@@ -11,6 +11,12 @@ import (
 	"dbterm/internal/ui"
 )
 
+var (
+	Version = "dev"
+	Commit  = "none"
+	Date    = "unknown"
+)
+
 func main() {
 	configPath := flag.String("config", "", "Path to connections.json")
 	profileID := flag.String("profile", "", "Connection profile ID to connect to on startup")
@@ -24,7 +30,13 @@ func main() {
 	secureFlag := flag.Bool("secure-passwords", false, "Migrate all passwords to OS Keychain/Keyring and strip from JSON")
 	encryptFlag := flag.Bool("encrypt-passwords", false, "Encrypt all plaintext passwords in connections.json with AES-256-GCM")
 	keyringSetFlag := flag.String("keyring-set", "", "Store a password in OS Keychain for specified profile ID (prompts on stdin)")
+	versionFlag := flag.Bool("version", false, "Print dbterm version and build info")
 	flag.Parse()
+
+	if *versionFlag {
+		fmt.Printf("dbterm version %s (commit: %s, built: %s)\n", Version, Commit, Date)
+		os.Exit(0)
+	}
 
 	// Load configuration
 	cfg, actualConfigPath, err := config.LoadConfig(*configPath)

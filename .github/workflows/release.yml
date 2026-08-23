@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Release Multi-Platform Binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          check-latest: true
+
+      - name: Run Tests
+        run: go test -v ./...
+
+      - name: Build and Package Binaries
+        env:
+          VERSION: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          mkdir -p dist
+          DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          
+          # Target platforms: OS/ARCH/BINARY_NAME
+          PLATFORMS=(
+            "linux/amd64/dbterm"
+            "linux/arm64/dbterm"
+            "darwin/amd64/dbterm"
+            "darwin/arm64/dbterm"
+            "windows/amd64/dbterm.exe"
+          )
+          
+          for item in "${PLATFORMS[@]}"; do
+            IFS="/" read -r OS ARCH BIN_NAME <<< "$item"
+            echo "==> Building for $OS/$ARCH..."
+            
+            BUILD_DIR="dist/dbterm_${VERSION}_${OS}_${ARCH}"
+            mkdir -p "$BUILD_DIR"
+            
+            GOOS=$OS GOARCH=$ARCH CGO_ENABLED=0 go build \
+              -trimpath \
+              -ldflags "-s -w -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.Date=${DATE}" \
+              -o "${BUILD_DIR}/${BIN_NAME}" \
+              ./cmd/dbterm
+            
+            # Copy documentation & sanitized example config
+            cp README.md LICENSE connections.example.json "${BUILD_DIR}/"
+            
+            # Create distribution archive
+            cd dist
+            if [ "$OS" = "windows" ]; then
+              zip -r "dbterm_${VERSION}_${OS}_${ARCH}.zip" "dbterm_${VERSION}_${OS}_${ARCH}"
+            else
+              tar -czvf "dbterm_${VERSION}_${OS}_${ARCH}.tar.gz" "dbterm_${VERSION}_${OS}_${ARCH}"
+            fi
+            cd ..
+          done
+          
+          # Compute SHA-256 checksums for security verification
+          cd dist
+          sha256sum *.tar.gz *.zip > checksums.txt
+          echo "Generated Checksums:"
+          cat checksums.txt
+          cd ..
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+          generate_release_notes: true
+          draft: false
+          prerelease: false
