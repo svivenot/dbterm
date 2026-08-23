@@ -49,7 +49,8 @@ jobs:
             IFS="/" read -r OS ARCH BIN_NAME <<< "$item"
             echo "==> Building for $OS/$ARCH..."
             
-            BUILD_DIR="dist/dbterm_${VERSION}_${OS}_${ARCH}"
+            FOLDER_NAME="dbterm_${VERSION}_${OS}_${ARCH}"
+            BUILD_DIR="dist/${FOLDER_NAME}"
             mkdir -p "$BUILD_DIR"
             
             GOOS=$OS GOARCH=$ARCH CGO_ENABLED=0 go build \
@@ -58,25 +59,25 @@ jobs:
               -o "${BUILD_DIR}/${BIN_NAME}" \
               ./cmd/dbterm
             
-            # Copy documentation & sanitized example config
+            # Copy documentation & sanitized example config into the bundle
             cp README.md LICENSE connections.example.json "${BUILD_DIR}/"
             
-            # Create distribution archive
+            # Create distribution archive & standalone binary
             cd dist
             if [ "$OS" = "windows" ]; then
-              cp "dbterm_${VERSION}_${OS}_${ARCH}/${BIN_NAME}" "dbterm_${VERSION}_${OS}_${ARCH}.exe"
-              zip -r "dbterm_${VERSION}_${OS}_${ARCH}.zip" "dbterm_${VERSION}_${OS}_${ARCH}"
+              cp "${FOLDER_NAME}/${BIN_NAME}" "dbterm-${VERSION}-${OS}-${ARCH}.exe"
+              zip -r "${FOLDER_NAME}.zip" "${FOLDER_NAME}"
             else
-              cp "dbterm_${VERSION}_${OS}_${ARCH}/${BIN_NAME}" "dbterm_${VERSION}_${OS}_${ARCH}"
-              chmod +x "dbterm_${VERSION}_${OS}_${ARCH}"
-              tar -czvf "dbterm_${VERSION}_${OS}_${ARCH}.tar.gz" "dbterm_${VERSION}_${OS}_${ARCH}"
+              cp "${FOLDER_NAME}/${BIN_NAME}" "dbterm-${VERSION}-${OS}-${ARCH}"
+              chmod +x "dbterm-${VERSION}-${OS}-${ARCH}"
+              tar -czvf "${FOLDER_NAME}.tar.gz" "${FOLDER_NAME}"
             fi
             cd ..
           done
           
           # Compute SHA-256 checksums for security verification
           cd dist
-          sha256sum *.tar.gz *.zip dbterm_* > checksums.txt 2>/dev/null || sha256sum *.tar.gz *.zip > checksums.txt
+          sha256sum *.tar.gz *.zip dbterm-* > checksums.txt
           echo "Generated Checksums:"
           cat checksums.txt
           cd ..
@@ -87,7 +88,7 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.zip
-            dist/dbterm_*
+            dist/dbterm-*
             dist/checksums.txt
           generate_release_notes: true
           draft: false
