@@ -64,8 +64,11 @@ jobs:
             # Create distribution archive
             cd dist
             if [ "$OS" = "windows" ]; then
+              cp "dbterm_${VERSION}_${OS}_${ARCH}/${BIN_NAME}" "dbterm_${VERSION}_${OS}_${ARCH}.exe"
               zip -r "dbterm_${VERSION}_${OS}_${ARCH}.zip" "dbterm_${VERSION}_${OS}_${ARCH}"
             else
+              cp "dbterm_${VERSION}_${OS}_${ARCH}/${BIN_NAME}" "dbterm_${VERSION}_${OS}_${ARCH}"
+              chmod +x "dbterm_${VERSION}_${OS}_${ARCH}"
               tar -czvf "dbterm_${VERSION}_${OS}_${ARCH}.tar.gz" "dbterm_${VERSION}_${OS}_${ARCH}"
             fi
             cd ..
@@ -73,7 +76,7 @@ jobs:
           
           # Compute SHA-256 checksums for security verification
           cd dist
-          sha256sum *.tar.gz *.zip > checksums.txt
+          sha256sum *.tar.gz *.zip dbterm_* > checksums.txt 2>/dev/null || sha256sum *.tar.gz *.zip > checksums.txt
           echo "Generated Checksums:"
           cat checksums.txt
           cd ..
@@ -84,6 +87,7 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.zip
+            dist/dbterm_*
             dist/checksums.txt
           generate_release_notes: true
           draft: false
