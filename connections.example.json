@@ -1,0 +1,58 @@
+{
+  "active_connection_id": "mssql-local-sales",
+  "connections": [
+    {
+      "id": "mssql-local-sales",
+      "name": "MS SQL - SalesDB (Local SA)",
+      "group": "Local / Docker",
+      "driver": "mssql",
+      "host": "localhost",
+      "port": 1433,
+      "database": "SalesDB",
+      "user": "sa",
+      "auth_type": "keyring"
+    },
+    {
+      "id": "postgres-sample",
+      "name": "PostgreSQL - Sample DB",
+      "group": "Local / Docker",
+      "driver": "postgres",
+      "host": "localhost",
+      "port": 5432,
+      "database": "postgres",
+      "user": "postgres",
+      "auth_type": "keyring",
+      "ssl_mode": "disable"
+    },
+    {
+      "id": "oracle-sample",
+      "name": "Oracle - Sample Service",
+      "group": "Local / Docker",
+      "driver": "oracle",
+      "host": "localhost",
+      "port": 1521,
+      "database": "ORCLPDB1",
+      "user": "system",
+      "auth_type": "keyring"
+    },
+    {
+      "id": "mssql-enterprise-sample",
+      "name": "MS SQL - Enterprise (Windows Auth)",
+      "group": "Production / Enterprise",
+      "driver": "mssql",
+      "host": "sql-corp.example.com",
+      "port": 1433,
+      "database": "SalesDB",
+      "user": "developer",
+      "domain": "CORP",
+      "auth_type": "windows"
+    }
+  ],
+  "ai": {
+    "enabled": true,
+    "provider": "ollama",
+    "ollama_host": "http://localhost:11434",
+    "model": "qwen2.5-coder:1.5b",
+    "auto_start": true
+  }
+}
