@@ -494,7 +494,11 @@ func (m Model) View() string {
 	} else if m.Filter != "" {
 		filterBadge = theme.TopBarBadge.Render(fmt.Sprintf(" Filter: [%s] ", m.Filter))
 	}
-	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, title, "  ", filterBadge) + "\n\n")
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, title, "  ", filterBadge) + "\n")
+	if m.ConfigPath != "" {
+		b.WriteString(theme.StyleFgDim.Render("  File: "+m.ConfigPath) + "\n")
+	}
+	b.WriteString("\n")
 
 	if m.Config == nil || len(m.Config.Connections) == 0 {
 		b.WriteString(theme.StyleError.Render("No connections defined in configuration.\nPress 'a' to add a new connection profile.") + "\n\n")
