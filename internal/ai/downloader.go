@@ -22,16 +22,45 @@ type ModelInfo struct {
 	Description string `json:"description"`
 }
 
-// Pre-configured default model for Intel Core Ultra 7 / CPU / NPU
-var DefaultModel = ModelInfo{
-	ID:          "qwen2.5-coder-1.5b-instruct",
-	Name:        "Qwen 2.5 Coder 1.5B Instruct (Q4_K_M)",
-	Filename:    "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
-	URL:         "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
-	SizeDisplay: "986 MB",
-	SizeBytes:   1034250240,
-	Description: "State-of-the-art compact SQL & code model. Ultra-fast, ideal for offline laptop CPU/NPU.",
-}
+var (
+	Qwen2_5_Coder_1_5B = ModelInfo{
+		ID:          "qwen2.5-coder-1.5b-instruct",
+		Name:        "Qwen 2.5 Coder 1.5B Instruct (Q4_K_M)",
+		Filename:    "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
+		URL:         "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
+		SizeDisplay: "986 MB",
+		SizeBytes:   1034250240,
+		Description: "Compact SQL model. Ultra-fast, low memory footprint.",
+	}
+
+	Qwen2_5_Coder_3B = ModelInfo{
+		ID:          "qwen2.5-coder-3b-instruct",
+		Name:        "Qwen 2.5 Coder 3B Instruct (Q4_K_M)",
+		Filename:    "qwen2.5-coder-3b-instruct-q4_k_m.gguf",
+		URL:         "https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF/resolve/main/qwen2.5-coder-3b-instruct-q4_k_m.gguf",
+		SizeDisplay: "2.1 GB",
+		SizeBytes:   2224000000,
+		Description: "Recommended: Exceptional SQL & business logic reasoning for enterprise databases.",
+	}
+
+	Qwen2_5_Coder_7B = ModelInfo{
+		ID:          "qwen2.5-coder-7b-instruct",
+		Name:        "Qwen 2.5 Coder 7B Instruct (Q4_K_M)",
+		Filename:    "qwen2.5-coder-7b-instruct-q4_k_m.gguf",
+		URL:         "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf",
+		SizeDisplay: "4.7 GB",
+		SizeBytes:   5024000000,
+		Description: "Top-tier SQL intelligence, matches GPT-4o-mini on complex multi-table joins & CTEs.",
+	}
+
+	DefaultModel = Qwen2_5_Coder_3B
+
+	AvailableModels = []ModelInfo{
+		Qwen2_5_Coder_3B,
+		Qwen2_5_Coder_1_5B,
+		Qwen2_5_Coder_7B,
+	}
+)
 
 // DownloadProgress reports real-time download status
 type DownloadProgress struct {

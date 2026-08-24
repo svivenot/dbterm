@@ -64,9 +64,9 @@ func (e *localEngine) IsAvailable() bool {
 
 func (e *localEngine) GetModelInfo() string {
 	if IsModelInstalled(DefaultModel) {
-		return fmt.Sprintf("Embedded Local (Qwen 2.5 Coder 1.5B | NPU/CPU)")
+		return fmt.Sprintf("Embedded Local (%s | NPU/CPU)", DefaultModel.Name)
 	}
-	return fmt.Sprintf("Local Engine (%s)", e.config.ModelName)
+	return fmt.Sprintf("AI Engine (%s)", e.config.ModelName)
 }
 
 func (e *localEngine) Generate(ctx context.Context, req AIRequest) (*AIResponse, error) {
