@@ -188,3 +188,56 @@ CREATE TABLE hr.Departments (
 		t.Errorf("Expected Group By DepartmentName with DATEDIFF, got: %s", sql5)
 	}
 }
+
+func TestCustomEnterpriseSchemaAnalysis(t *testing.T) {
+	gen := NewEmbeddedSQLGenerator()
+
+	schemaEnterprise := &SchemaSummary{
+		Database: "ProdERP",
+		Dialect:  "PostgreSQL",
+		DDLContext: `CREATE TABLE public.t_factures (
+  id_facture bigint PRIMARY KEY,
+  dt_facturation date NOT NULL,
+  montant_ht numeric(12,2) NOT NULL,
+  montant_tva numeric(12,2) NOT NULL,
+  id_client bigint NOT NULL,
+  statut_paiement varchar(20)
+);
+
+CREATE TABLE public.t_clients (
+  id_client bigint PRIMARY KEY,
+  raison_sociale varchar(100) NOT NULL,
+  code_postal varchar(10),
+  ville varchar(50),
+  pays varchar(50)
+);
+`,
+	}
+
+	// 1. Total revenue per client
+	sql1, exp1 := gen.Generate(AIRequest{
+		Mode:       AIModeGenerate,
+		UserPrompt: "chiffre d'affaires total par client",
+	}, schemaEnterprise)
+
+	if !strings.Contains(sql1, "SUM(f.montant_ht)") && !strings.Contains(sql1, "SUM(t_factures.montant_ht)") {
+		t.Errorf("Expected SUM(montant_ht) in generated SQL, got:\n%s", sql1)
+	}
+	if !strings.Contains(sql1, "public.t_clients") || !strings.Contains(sql1, "public.t_factures") {
+		t.Errorf("Expected join between t_clients and t_factures, got:\n%s", sql1)
+	}
+	if !strings.Contains(sql1, "raison_sociale") {
+		t.Errorf("Expected group by raison_sociale, got:\n%s", sql1)
+	}
+	t.Logf("Generated Enterprise SQL:\n%s\nExplanation: %s", sql1, exp1)
+
+	// 2. Average invoice amount
+	sql2, _ := gen.Generate(AIRequest{
+		Mode:       AIModeGenerate,
+		UserPrompt: "montant moyen des factures",
+	}, schemaEnterprise)
+
+	if !strings.Contains(sql2, "AVG(montant_ht)") {
+		t.Errorf("Expected AVG(montant_ht), got:\n%s", sql2)
+	}
+}
