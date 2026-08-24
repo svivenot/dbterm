@@ -54,6 +54,19 @@ func TestBuildUserPrompt(t *testing.T) {
 	}
 }
 
+func TestBuildSQLCoderPrompt(t *testing.T) {
+	sys, user := BuildSQLCoderPrompt("PostgreSQL", "CREATE TABLE users (id int, email text);", "Liste tous les utilisateurs")
+	if !strings.Contains(sys, "PostgreSQL") {
+		t.Errorf("Expected dialect in system prompt: %s", sys)
+	}
+	if !strings.Contains(user, "### Task") || !strings.Contains(user, "### Database Schema") || !strings.Contains(user, "### SQL") {
+		t.Errorf("Expected SQLCoder specific section headers: %s", user)
+	}
+	if !strings.Contains(user, "Liste tous les utilisateurs") || !strings.Contains(user, "CREATE TABLE users") {
+		t.Errorf("Expected question and schema in user prompt: %s", user)
+	}
+}
+
 func TestModelInfoAndPaths(t *testing.T) {
 	dir, err := GetModelsDir()
 	if err != nil {

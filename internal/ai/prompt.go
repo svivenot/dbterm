@@ -89,6 +89,26 @@ func BuildUserPrompt(mode AIMode, userPrompt, existingSQL, errorMsg string) stri
 	return b.String()
 }
 
+// BuildSQLCoderPrompt creates the prompt formatted specifically for Defog SQLCoder models
+func BuildSQLCoderPrompt(dialect, schemaContext, userPrompt string) (string, string) {
+	systemPrompt := fmt.Sprintf("You are an expert SQL assistant. Your task is to generate valid, optimal %s queries strictly matching the provided database schema.", dialect)
+
+	var b strings.Builder
+	b.WriteString("### Task\n")
+	b.WriteString(fmt.Sprintf("Generate a SQL query to answer the following question:\n`%s`\n\n", userPrompt))
+	b.WriteString("### Database Schema\n")
+	b.WriteString("The query will run on a database with the following schema:\n")
+	if strings.TrimSpace(schemaContext) != "" {
+		b.WriteString(schemaContext)
+	} else {
+		b.WriteString("-- No schema definitions available.\n")
+	}
+	b.WriteString("\n### SQL\n")
+	b.WriteString(fmt.Sprintf("Given the database schema, here is the SQL query that answers `%s`:\n```sql\n", userPrompt))
+
+	return systemPrompt, b.String()
+}
+
 // ExtractSQLAndExplanation separates the generated SQL code from the textual explanation
 func ExtractSQLAndExplanation(response string) (string, string) {
 	trimmed := strings.TrimSpace(response)

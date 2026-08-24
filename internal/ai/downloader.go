@@ -53,12 +53,23 @@ var (
 		Description: "Top-tier SQL intelligence, matches GPT-4o-mini on complex multi-table joins & CTEs.",
 	}
 
-	DefaultModel = Qwen2_5_Coder_3B
+	SQLCoder_7B_2 = ModelInfo{
+		ID:          "sqlcoder-7b-2",
+		Name:        "Defog SQLCoder 7B-2 (Q4_K_M)",
+		Filename:    "sqlcoder-7b-2.Q4_K_M.gguf",
+		URL:         "https://huggingface.co/TheBloke/sqlcoder-7b-2-GGUF/resolve/main/sqlcoder-7b-2.Q4_K_M.gguf",
+		SizeDisplay: "4.5 GB",
+		SizeBytes:   4480000000,
+		Description: "Defog specialized Text-to-SQL foundation model fine-tuned specifically on database query generation.",
+	}
+
+	DefaultModel = SQLCoder_7B_2
 
 	AvailableModels = []ModelInfo{
+		SQLCoder_7B_2,
 		Qwen2_5_Coder_3B,
-		Qwen2_5_Coder_1_5B,
 		Qwen2_5_Coder_7B,
+		Qwen2_5_Coder_1_5B,
 	}
 )
 

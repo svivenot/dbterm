@@ -83,8 +83,13 @@ func (e *localEngine) Generate(ctx context.Context, req AIRequest) (*AIResponse,
 	}
 
 	// 2. Build system and user prompts
-	systemPrompt := BuildSystemPrompt(schemaSummary.Dialect, schemaSummary.DDLContext)
-	userPrompt := BuildUserPrompt(req.Mode, req.UserPrompt, req.CurrentSQL, req.ErrorMessage)
+	var systemPrompt, userPrompt string
+	if strings.Contains(strings.ToLower(e.config.ModelName), "sqlcoder") && req.Mode == AIModeGenerate {
+		systemPrompt, userPrompt = BuildSQLCoderPrompt(schemaSummary.Dialect, schemaSummary.DDLContext, req.UserPrompt)
+	} else {
+		systemPrompt = BuildSystemPrompt(schemaSummary.Dialect, schemaSummary.DDLContext)
+		userPrompt = BuildUserPrompt(req.Mode, req.UserPrompt, req.CurrentSQL, req.ErrorMessage)
+	}
 
 	// 3. Perform Inference
 	rawResponse, err := e.callInference(ctx, systemPrompt, userPrompt)
