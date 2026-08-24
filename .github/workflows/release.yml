@@ -25,6 +25,11 @@ jobs:
           go-version: '1.24'
           check-latest: true
 
+      - name: Install Linux GUI Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev
+
       - name: Run Tests
         run: go test -v ./...
 
@@ -47,7 +52,7 @@ jobs:
           
           for item in "${PLATFORMS[@]}"; do
             IFS="/" read -r OS ARCH BIN_NAME <<< "$item"
-            echo "==> Building for $OS/$ARCH..."
+            echo "==> Building TUI for $OS/$ARCH..."
             
             FOLDER_NAME="dbterm_${VERSION}_${OS}_${ARCH}"
             BUILD_DIR="dist/${FOLDER_NAME}"
@@ -58,6 +63,18 @@ jobs:
               -ldflags "-s -w -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.Date=${DATE}" \
               -o "${BUILD_DIR}/${BIN_NAME}" \
               ./cmd/dbterm
+
+            # For Linux amd64, also compile native desktop GUI binary
+            if [ "$OS" = "linux" ] && [ "$ARCH" = "amd64" ]; then
+              echo "==> Building Desktop GUI for linux/amd64..."
+              go build \
+                -trimpath \
+                -ldflags "-s -w -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.Date=${DATE}" \
+                -o "${BUILD_DIR}/dbterm-gui" \
+                ./cmd/dbterm-gui
+              cp "${BUILD_DIR}/dbterm-gui" "dist/dbterm-gui-${VERSION}-linux-amd64"
+              chmod +x "dist/dbterm-gui-${VERSION}-linux-amd64"
+            fi
             
             # Copy documentation & sanitized example config into the bundle
             cp README.md LICENSE connections.example.json "${BUILD_DIR}/"
