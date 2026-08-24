@@ -93,19 +93,20 @@ func ShowAIDialog(
 			}
 
 			resp, err := engine.Generate(ctx, req)
-			progressBar.Hide()
+			fyne.Do(func() {
+				progressBar.Hide()
+				if err != nil {
+					statusLabel.SetText(fmt.Sprintf("Error: %v", err))
+					dialog.ShowError(err, w)
+					return
+				}
 
-			if err != nil {
-				statusLabel.SetText(fmt.Sprintf("Error: %v", err))
-				dialog.ShowError(err, w)
-				return
-			}
-
-			if resp != nil {
-				generatedEntry.SetText(resp.GeneratedSQL)
-				explanationLabel.SetText(resp.Explanation)
-				statusLabel.SetText(fmt.Sprintf("✓ Generated with %s in %v", resp.ModelUsed, resp.Duration.Round(time.Millisecond)))
-			}
+				if resp != nil {
+					generatedEntry.SetText(resp.GeneratedSQL)
+					explanationLabel.SetText(resp.Explanation)
+					statusLabel.SetText(fmt.Sprintf("✓ Generated with %s in %v", resp.ModelUsed, resp.Duration.Round(time.Millisecond)))
+				}
+			})
 		}()
 	})
 	generateBtn.Importance = widget.HighImportance

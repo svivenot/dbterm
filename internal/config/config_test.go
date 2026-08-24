@@ -6,7 +6,7 @@ import (
 )
 
 func TestConfigLoadDefault(t *testing.T) {
-	cfg, _, err := LoadConfig("../../connections.json")
+	cfg, _, err := LoadConfig("../../connections.example.json")
 	if err != nil {
 		t.Fatalf("Failed to load config: %v", err)
 	}

@@ -133,17 +133,23 @@ func (cd *ConnectionDialog) show() {
 			go func() {
 				drv, err := db.NewDriver(&p)
 				if err != nil {
-					dialog.ShowError(fmt.Errorf("Driver init failed: %w", err), cd.window)
+					fyne.Do(func() {
+						dialog.ShowError(fmt.Errorf("Driver init failed: %w", err), cd.window)
+					})
 					return
 				}
 				ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 				defer cancel()
 				if err := drv.Connect(ctx, &p); err != nil {
-					dialog.ShowError(fmt.Errorf("Connection failed: %w", err), cd.window)
+					fyne.Do(func() {
+						dialog.ShowError(fmt.Errorf("Connection failed: %w", err), cd.window)
+					})
 					return
 				}
 				_ = drv.Close()
-				dialog.ShowInformation("Success", fmt.Sprintf("✓ Successfully connected to '%s'!", p.Name), cd.window)
+				fyne.Do(func() {
+					dialog.ShowInformation("Success", fmt.Sprintf("✓ Successfully connected to '%s'!", p.Name), cd.window)
+				})
 			}()
 		}
 	})
