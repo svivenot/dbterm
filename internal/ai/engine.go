@@ -132,9 +132,14 @@ func (e *localEngine) callInference(ctx context.Context, systemPrompt, userPromp
 }
 
 func (e *localEngine) callOllama(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	modelName := e.config.ModelName
+	if modelName == "" {
+		modelName = "qwen2.5-coder:3b"
+	}
+
 	url := fmt.Sprintf("%s/api/chat", strings.TrimRight(e.config.Endpoint, "/"))
 	payload := map[string]any{
-		"model":  e.config.ModelName,
+		"model":  modelName,
 		"stream": false,
 		"messages": []map[string]string{
 			{"role": "system", "content": systemPrompt},
@@ -163,6 +168,30 @@ func (e *localEngine) callOllama(ctx context.Context, systemPrompt, userPrompt s
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		// If model was not found, auto-detect available installed model in Ollama (e.g. qwen3, qwen2.5-coder, etc.)
+		if resp.StatusCode == http.StatusNotFound {
+			detectedModel, err := e.detectBestOllamaModel(ctx)
+			if err == nil && detectedModel != "" && detectedModel != modelName {
+				payload["model"] = detectedModel
+				body, _ = json.Marshal(payload)
+				retryReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+				if err == nil {
+					retryReq.Header.Set("Content-Type", "application/json")
+					retryResp, err := e.httpClient.Do(retryReq)
+					if err == nil && retryResp.StatusCode == http.StatusOK {
+						defer retryResp.Body.Close()
+						var resObj struct {
+							Message struct {
+								Content string `json:"content"`
+							} `json:"message"`
+						}
+						if err := json.NewDecoder(retryResp.Body).Decode(&resObj); err == nil {
+							return resObj.Message.Content, nil
+						}
+					}
+				}
+			}
+		}
 		return "", fmt.Errorf("ollama HTTP %d", resp.StatusCode)
 	}
 
@@ -176,6 +205,48 @@ func (e *localEngine) callOllama(ctx context.Context, systemPrompt, userPrompt s
 		return "", err
 	}
 	return resObj.Message.Content, nil
+}
+
+func (e *localEngine) detectBestOllamaModel(ctx context.Context) (string, error) {
+	url := fmt.Sprintf("%s/api/tags", strings.TrimRight(e.config.Endpoint, "/"))
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := e.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var tagsResp struct {
+		Models []struct {
+			Name string `json:"name"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&tagsResp); err != nil {
+		return "", err
+	}
+
+	if len(tagsResp.Models) == 0 {
+		return "", fmt.Errorf("no models installed in ollama")
+	}
+
+	// 1. Prefer models with "coder", "qwen", "deepseek", or "sql" in their name
+	for _, m := range tagsResp.Models {
+		lower := strings.ToLower(m.Name)
+		if strings.Contains(lower, "coder") || strings.Contains(lower, "sql") {
+			return m.Name, nil
+		}
+	}
+	for _, m := range tagsResp.Models {
+		lower := strings.ToLower(m.Name)
+		if strings.Contains(lower, "qwen") || strings.Contains(lower, "deepseek") || strings.Contains(lower, "llama") {
+			return m.Name, nil
+		}
+	}
+
+	return tagsResp.Models[0].Name, nil
 }
 
 func (e *localEngine) callOpenAICompat(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
