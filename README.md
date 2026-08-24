@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Built with BubbleTea](https://img.shields.io/badge/Built%20with-BubbleTea-00ADD8.svg)](https://github.com/charmbracelet/bubbletea)
 
-**dbterm** is a modern, fast, and ergonomic Terminal User Interface (TUI) for querying and managing **Microsoft SQL Server**, **PostgreSQL**, and **Oracle Database**, designed with the productivity and ergonomics of **SQL Server Management Studio (SSMS)** and powered by an offline, schema-aware AI SQL generator.
+**dbterm** is a modern, fast, and ergonomic SQL client available both as a **Terminal User Interface (TUI)** (powered by BubbleTea) and a **Native Desktop GUI** (powered by Fyne) for querying and managing **Microsoft SQL Server**, **PostgreSQL**, and **Oracle Database**, designed with the productivity of **SQL Server Management Studio (SSMS)** and powered by an offline, schema-aware AI SQL generator.
 
 ```text
 +---------------------------------------------------------------------------------------------------+
@@ -25,7 +25,7 @@
 |                       |----+------------+--------------------------+------------------------------|
 |                       | 1  | CUST001    | Airbus Group SAS         | 1                            |
 |                       | 2  | CUST002    | Siemens AG               | 1                            |
-+-----------------------+---------------------------------------------------------------------------+
+| +---------------------+---------------------------------------------------------------------------+
 | Ready | Ln 1, Col 1   [F5: Run | Tab: Switch Pane | Ctrl+N: Tab | Ctrl+H: History | Ctrl+S: Export]   |
 +---------------------------------------------------------------------------------------------------+
 ```
@@ -34,6 +34,9 @@
 
 ## ✨ Features
 
+- **Dual Interface Modes**:
+  - **TUI Mode (`dbterm`)**: Ultra-fast terminal client with single-line guarantee and mouse support.
+  - **Native Desktop GUI Mode (`dbterm-gui`)**: Full-featured graphical window built with **Fyne v2** featuring resizable panels, grid inspector, and visual dialogs.
 - **Multi-Database Support**: Native drivers for **MS SQL Server** (`go-mssqldb`), **PostgreSQL** (`pgx`), and **Oracle Database** (`sijms/go-ora`).
 - **SSMS-Inspired Object Explorer (`F8`)**:
   - **Hierarchical Server Folders**: Classify servers into logical environments (`📁 Local / Docker`, `📁 Production / Enterprise`).
@@ -46,7 +49,7 @@
   - Selection execution (`F5` / `Ctrl+E` executes selected SQL text or full buffer).
   - Visual selection mode (`F2` / `Shift+Arrows`).
 - **Single-Line Guarantee Results Grid**:
-  - Data rows never wrap or disrupt terminal layout.
+  - Data rows never wrap or disrupt layout.
   - **Horizontal Column Scrolling** (`Left`/`Right`, `h`/`l`) with sticky row numbering.
   - Cell value inspector (`Enter` / `v`) for multi-line text, JSON, and XML payloads.
   - Column sorting (`o`) and live in-memory row filtering (`/`).
@@ -56,9 +59,9 @@
   - **Unix `pass` & Environment Variables**: Native support for enterprise credential management.
   - Interactive Connection Manager (`Ctrl+O`) with full **Add (`a`)**, **Edit (`e`)**, and **Delete (`d`)** support.
 - **Embedded Schema-Aware AI SQL Generator (`Ctrl+K` / `F4`)**:
-  - Zero-setup offline text-to-SQL generation.
-  - Intelligently generates dialect-specific queries (`DATEDIFF`, `DATEADD`, `GROUP BY`, `SUM/AVG`, joins, and aggregations) using the active database catalog.
-- **Multi-Format Export Dialog (`e` on results)**:
+  - Zero-setup offline text-to-SQL generation with **Defog SQLCoder-7B-2 (Q4)** & **Qwen 2.5 Coder 3B/7B**.
+  - Dynamic schema tokenizer (no accents, snake_case/camelCase extraction) and auto foreign key join resolution.
+- **Multi-Format Export Dialog (`e` on results / Ctrl+E)**:
   - Export query results directly to **Excel (.xlsx)**, **CSV**, **JSON**, **Markdown**, **HTML**, or **Plain Text**.
 - **Full Mouse Navigation**: Focus panes by clicking, resize sidebars by dragging, double-click to connect servers, and right-click for context menus.
 
@@ -66,18 +69,24 @@
 
 ## 🚀 Quick Start
 
-### Installation
+### Installation & Build
 
 ```bash
 # Clone the repository
 git clone https://github.com/svivenot/dbterm.git
 cd dbterm
 
-# Build the binary
+# 1. Build the Terminal UI (TUI)
 go build -o bin/dbterm ./cmd/dbterm
 
-# Run dbterm
+# 2. Build the Graphical Desktop Application (Fyne GUI)
+go build -o bin/dbterm-gui ./cmd/dbterm-gui
+
+# Run TUI
 ./bin/dbterm
+
+# Run Desktop GUI
+./bin/dbterm-gui
 ```
 
 ### Starting the Local Test Database (MS SQL Server)
