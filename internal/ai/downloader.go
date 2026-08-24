@@ -57,7 +57,7 @@ var (
 		ID:          "sqlcoder-7b-2",
 		Name:        "Defog SQLCoder 7B-2 (Q4_K_M)",
 		Filename:    "sqlcoder-7b-2.Q4_K_M.gguf",
-		URL:         "https://huggingface.co/TheBloke/sqlcoder-7b-2-GGUF/resolve/main/sqlcoder-7b-2.Q4_K_M.gguf",
+		URL:         "https://huggingface.co/MaziyarPanahi/sqlcoder-7b-2-GGUF/resolve/main/sqlcoder-7b-2.Q4_K_M.gguf",
 		SizeDisplay: "4.5 GB",
 		SizeBytes:   4480000000,
 		Description: "Defog specialized Text-to-SQL foundation model fine-tuned specifically on database query generation.",

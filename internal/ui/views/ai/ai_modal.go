@@ -167,7 +167,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.CancelDown = nil
 			if prog.Error == nil {
 				m.NeedsDownload = false
-				m.Explanation = "✓ Model Qwen 2.5 Coder downloaded successfully! Ready for offline SQL generation."
+				m.Explanation = fmt.Sprintf("✓ Model %s downloaded successfully! Ready for offline SQL generation.", ai.DefaultModel.Name)
 			} else {
 				m.Explanation = fmt.Sprintf("Download failed: %v", prog.Error)
 			}
@@ -184,7 +184,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.CancelDown = nil
 		if msg.Error == nil {
 			m.NeedsDownload = false
-			m.Explanation = "✓ Model Qwen 2.5 Coder downloaded successfully! Ready for offline SQL generation."
+			m.Explanation = fmt.Sprintf("✓ Model %s downloaded successfully! Ready for offline SQL generation.", ai.DefaultModel.Name)
 		} else {
 			m.Explanation = fmt.Sprintf("Download failed: %v", msg.Error)
 		}
@@ -364,14 +364,24 @@ func (m Model) View() string {
 
 			speedMB := float64(m.DownloadProg.SpeedBytesSec) / (1024 * 1024)
 			downloadedMB := float64(m.DownloadProg.BytesRead) / (1024 * 1024)
-			totalMB := float64(m.DownloadProg.TotalBytes) / (1024 * 1024)
+			totalBytes := m.DownloadProg.TotalBytes
+			if totalBytes <= 0 {
+				totalBytes = ai.DefaultModel.SizeBytes
+			}
+			totalMB := float64(totalBytes) / (1024 * 1024)
+			if pct <= 0 && totalBytes > 0 && m.DownloadProg.BytesRead > 0 {
+				pct = float64(m.DownloadProg.BytesRead) / float64(totalBytes) * 100.0
+			}
 
-			b.WriteString(fmt.Sprintf("  %s Downloading model... %.1f%%\n", m.Spinner.View(), pct))
+			b.WriteString(fmt.Sprintf("  %s Downloading %s... %.1f%%\n", m.Spinner.View(), ai.DefaultModel.Name, pct))
 			b.WriteString(fmt.Sprintf("  [%s]\n", barRendered))
 			b.WriteString(theme.StyleFgMuted.Render(fmt.Sprintf("  %.1f MB / %.1f MB (%.1f MB/s | ETA: %ds)\n\n", downloadedMB, totalMB, speedMB, m.DownloadProg.EtaSeconds)))
 			b.WriteString(theme.StyleFgDim.Render("  Press Esc to cancel download.\n"))
 		} else {
-			b.WriteString(theme.ButtonActive.Render(" Enter: Download Model Now (~980 MB) ") + "   " + theme.ButtonInactive.Render(" Esc: Cancel ") + "\n\n")
+			if m.Explanation != "" {
+				b.WriteString(theme.StyleError.Render("  "+m.Explanation) + "\n\n")
+			}
+			b.WriteString(theme.ButtonActive.Render(fmt.Sprintf(" Enter: Download %s (%s) ", ai.DefaultModel.Name, ai.DefaultModel.SizeDisplay)) + "   " + theme.ButtonInactive.Render(" Esc: Cancel ") + "\n\n")
 			b.WriteString(theme.StyleFgMuted.Render("  Model will be cached locally in ~/.local/share/dbterm/models/ for instant offline access."))
 		}
 
