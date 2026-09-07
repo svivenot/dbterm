@@ -15,6 +15,7 @@ import (
 	"dbterm/internal/db"
 	"dbterm/internal/export"
 	"dbterm/internal/history"
+	"dbterm/internal/lsp"
 	"dbterm/internal/ui/theme"
 	aiview "dbterm/internal/ui/views/ai"
 	"dbterm/internal/ui/views/connection"
@@ -46,6 +47,8 @@ type Model struct {
 	ConfigPath         string
 	ActiveProfile      *config.ConnectionProfile
 	Driver             db.Driver
+	LSPServer          *lsp.Server
+	LSPClient          *lsp.Client
 	Focus              FocusArea
 	Explorer           explorer.Model
 	Editor             editor.Model
@@ -79,6 +82,9 @@ func NewApp(cfg *config.Config, configPath string, initialProfile *config.Connec
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(theme.ColorYellow)
 
+	lspServer := lsp.NewServer()
+	lspClient := lsp.NewClient(lspServer)
+
 	var activeDriver db.Driver
 	if initialProfile != nil {
 		driver, err := db.NewDriver(initialProfile)
@@ -87,6 +93,9 @@ func NewApp(cfg *config.Config, configPath string, initialProfile *config.Connec
 			defer cancel()
 			if err := driver.Connect(ctx, initialProfile); err == nil {
 				activeDriver = driver
+				go func() {
+					_ = lspServer.UpdateSchema(context.Background(), driver)
+				}()
 			}
 		}
 	}
@@ -99,6 +108,7 @@ func NewApp(cfg *config.Config, configPath string, initialProfile *config.Connec
 	histMgr := history.NewManager(200)
 	expl := explorer.New(cfg, initialProfile, activeDriver, activeDB)
 	ed := editor.New("")
+	ed.SetLSPClient(lspClient)
 	res := results.New()
 	connMod := connection.New(cfg, configPath)
 	helpMod := help.New()
@@ -120,6 +130,8 @@ func NewApp(cfg *config.Config, configPath string, initialProfile *config.Connec
 		ConfigPath:     configPath,
 		ActiveProfile:  initialProfile,
 		Driver:         activeDriver,
+		LSPServer:      lspServer,
+		LSPClient:      lspClient,
 		Focus:          FocusEditor,
 		Explorer:       expl,
 		Editor:         ed,
@@ -355,6 +367,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			_ = m.Driver.SwitchDatabase(context.Background(), msg.Database)
 			m.StatusToast = fmt.Sprintf("Active database: %s", msg.Database)
 			m.StatusToastTime = time.Now()
+			if m.LSPServer != nil {
+				go func(d db.Driver) {
+					_ = m.LSPServer.UpdateSchema(context.Background(), d)
+				}(m.Driver)
+			}
 		}
 	case explorer.OpenFileMsg:
 		m.Editor.OpenFile(msg.FilePath, msg.Content)
@@ -679,6 +696,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "tab":
+			if m.Focus == FocusEditor && m.Editor.CompletionActive {
+				var cmd tea.Cmd
+				m.Editor, cmd = m.Editor.Update(msg)
+				return m, cmd
+			}
 			if m.Focus == FocusExplorer {
 				m.Focus = FocusEditor
 				m.Editor.Focus()
@@ -983,6 +1005,11 @@ func (m Model) handleConnectProfile(profile *config.ConnectionProfile) (tea.Mode
 
 	m.Driver = driver
 	m.Explorer.SetActiveConnection(profile, driver, profile.Database)
+	if m.LSPServer != nil {
+		go func(d db.Driver) {
+			_ = m.LSPServer.UpdateSchema(context.Background(), d)
+		}(driver)
+	}
 	m.StatusToast = fmt.Sprintf("✓ Connected to %s (%s)", profile.Name, profile.Database)
 	m.StatusToastTime = time.Now()
 	m.updateLayout()

@@ -17,6 +17,7 @@ import (
 	"dbterm/internal/config"
 	"dbterm/internal/db"
 	"dbterm/internal/gui/dialogs"
+	"dbterm/internal/lsp"
 )
 
 type App struct {
@@ -26,6 +27,8 @@ type App struct {
 	ConfigPath     string
 	ActiveProfile  *config.ConnectionProfile
 	Driver         db.Driver
+	LSPServer      *lsp.Server
+	LSPClient      *lsp.Client
 	cancelExec     context.CancelFunc
 	isExecuting    bool
 	lastError      string
@@ -51,6 +54,15 @@ func NewApp(cfg *config.Config, cfgPath string, initialProfile *config.Connectio
 	w := a.NewWindow("dbterm - SQL Management Studio (GUI)")
 	w.Resize(fyne.NewSize(1200, 780))
 
+	lspServer := lsp.NewServer()
+	lspClient := lsp.NewClient(lspServer)
+
+	if initialDriver != nil {
+		go func() {
+			_ = lspServer.UpdateSchema(context.Background(), initialDriver)
+		}()
+	}
+
 	guiApp := &App{
 		FyneApp:       a,
 		Window:        w,
@@ -58,6 +70,8 @@ func NewApp(cfg *config.Config, cfgPath string, initialProfile *config.Connectio
 		ConfigPath:    cfgPath,
 		ActiveProfile: initialProfile,
 		Driver:        initialDriver,
+		LSPServer:     lspServer,
+		LSPClient:     lspClient,
 	}
 
 	guiApp.initUI()
@@ -108,6 +122,8 @@ func (a *App) initUI() {
 	aiBtn := widget.NewButtonWithIcon("AI Assistant (Ctrl+K)", theme.HelpIcon(), a.ShowAIDialog)
 	aiBtn.Importance = widget.MediumImportance
 
+	autoBtn := widget.NewButtonWithIcon("Autocomplete (F2)", theme.SearchIcon(), a.ShowCompletionDialog)
+
 	exportBtn := widget.NewButtonWithIcon("Export (Ctrl+E)", theme.DownloadIcon(), a.ShowExportDialog)
 
 	serverName := "Not Connected"
@@ -120,6 +136,11 @@ func (a *App) initUI() {
 		if a.Driver != nil && selected != "" {
 			_ = a.Driver.SwitchDatabase(context.Background(), selected)
 			a.Explorer.Refresh()
+			if a.LSPServer != nil {
+				go func() {
+					_ = a.LSPServer.UpdateSchema(context.Background(), a.Driver)
+				}()
+			}
 			a.SetStatus(fmt.Sprintf("Switched database to '%s'", selected))
 		}
 	})
@@ -136,6 +157,7 @@ func (a *App) initUI() {
 		widget.NewSeparator(),
 		newQueryBtn,
 		saveBtn,
+		autoBtn,
 		widget.NewSeparator(),
 		aiBtn,
 		exportBtn,
@@ -191,6 +213,10 @@ func (a *App) setupKeybindings() {
 				a.ExecuteCurrentQuery()
 			case fyne.KeyF4:
 				a.ShowAIDialog()
+			case fyne.KeyF2, fyne.KeySpace:
+				if ev.Name == fyne.KeyF2 {
+					a.ShowCompletionDialog()
+				}
 			}
 		})
 	}
@@ -310,6 +336,12 @@ func (a *App) ConnectToProfile(profile config.ConnectionProfile) {
 			dbNames = []string{profile.Database}
 		}
 
+		if a.LSPServer != nil {
+			go func() {
+				_ = a.LSPServer.UpdateSchema(context.Background(), drv)
+			}()
+		}
+
 		fyne.Do(func() {
 			a.serverBadge.SetText(fmt.Sprintf("%s (%s)", profile.Name, profile.Host))
 			if len(dbNames) > 0 {
@@ -324,6 +356,21 @@ func (a *App) ConnectToProfile(profile config.ConnectionProfile) {
 			a.SetStatus(fmt.Sprintf("✓ Connected to '%s' (%s)", profile.Name, profile.Driver))
 		})
 	}()
+}
+
+func (a *App) ShowCompletionDialog() {
+	if a.LSPClient == nil {
+		return
+	}
+	dialogs.ShowCompletionDialog(
+		a.Window,
+		a.LSPClient,
+		a.Editor.GetActiveQuery(),
+		func(sql string) {
+			a.Editor.InsertSQL(sql)
+			a.SetStatus(fmt.Sprintf("✓ Inserted '%s'", sql))
+		},
+	)
 }
 
 func (a *App) ShowAIDialog() {

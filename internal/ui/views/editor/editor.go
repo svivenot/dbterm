@@ -4,13 +4,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"dbterm/internal/lsp"
 	"dbterm/internal/ui/syntax"
 	"dbterm/internal/ui/theme"
 )
@@ -45,12 +48,18 @@ type TabInfo struct {
 }
 
 type Model struct {
-	Tabs        []TabInfo
-	ActiveIndex int
-	Width       int
-	Height      int
-	Focused     bool
-	MouseDown   bool
+	Tabs               []TabInfo
+	ActiveIndex        int
+	Width              int
+	Height             int
+	Focused            bool
+	MouseDown          bool
+	LSPClient          *lsp.Client
+	CompletionActive   bool
+	Completions        []lsp.CompletionItem
+	SelectedCompletion int
+	CompletionLine     int
+	CompletionCol      int
 }
 
 func New(initialQuery string) Model {
@@ -216,6 +225,206 @@ func (m *Model) GetCurrentQuery() string {
 		}
 	}
 	return tab.Textarea.Value()
+}
+
+func (m *Model) SetLSPClient(client *lsp.Client) {
+	m.LSPClient = client
+}
+
+// TriggerCompletion fetches autocompletions from LSP
+func (m *Model) TriggerCompletion(explicit bool) {
+	if m.LSPClient == nil || len(m.Tabs) == 0 || m.ActiveIndex >= len(m.Tabs) {
+		return
+	}
+	tab := &m.Tabs[m.ActiveIndex]
+	sql := tab.Textarea.Value()
+	curLine := tab.Textarea.Line()
+	curCol := tab.Textarea.LineInfo().ColumnOffset
+
+	lines := strings.Split(sql, "\n")
+	if curLine < len(lines) {
+		lineText := lines[curLine]
+		if curCol > len(lineText) {
+			curCol = len(lineText)
+		}
+		textBefore := lineText[:curCol]
+
+		if !explicit {
+			trimmed := strings.TrimRight(textBefore, " \t")
+			isDot := strings.HasSuffix(trimmed, ".")
+			// Find word before cursor
+			startCol := curCol
+			for startCol > 0 {
+				r := rune(lineText[startCol-1])
+				if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' && r != '#' && r != '$' {
+					break
+				}
+				startCol--
+			}
+			word := lineText[startCol:curCol]
+			if !isDot && len(word) < 2 {
+				m.CompletionActive = false
+				m.Completions = nil
+				return
+			}
+		}
+	}
+
+	items := m.LSPClient.GetCompletions("file://current_query.sql", sql, curLine, curCol)
+	if len(items) == 0 {
+		m.CompletionActive = false
+		m.Completions = nil
+		return
+	}
+
+	m.Completions = items
+	m.SelectedCompletion = 0
+	m.CompletionActive = true
+	m.CompletionLine = curLine
+	m.CompletionCol = curCol
+}
+
+// AcceptCompletion applies the selected autocompletion item into the active textarea
+func (m *Model) AcceptCompletion() bool {
+	if !m.CompletionActive || len(m.Completions) == 0 || m.SelectedCompletion >= len(m.Completions) {
+		return false
+	}
+	tab := &m.Tabs[m.ActiveIndex]
+	item := m.Completions[m.SelectedCompletion]
+
+	insertVal := item.InsertText
+	if insertVal == "" {
+		insertVal = item.Label
+	}
+
+	// Strip snippet placeholders like ${1:table}
+	reSnippet := regexp.MustCompile(`\$\{\d+:([^}]+)\}`)
+	insertVal = reSnippet.ReplaceAllString(insertVal, "$1")
+	insertVal = strings.ReplaceAll(insertVal, "${1:*}", "*")
+	insertVal = strings.ReplaceAll(insertVal, "$1", "")
+	insertVal = strings.ReplaceAll(insertVal, "$2", "")
+	insertVal = strings.ReplaceAll(insertVal, "$3", "")
+	insertVal = strings.ReplaceAll(insertVal, "$4", "")
+
+	lines := strings.Split(tab.Textarea.Value(), "\n")
+	curLine := tab.Textarea.Line()
+	curCol := tab.Textarea.LineInfo().ColumnOffset
+
+	if curLine < len(lines) {
+		lineText := lines[curLine]
+		if curCol > len(lineText) {
+			curCol = len(lineText)
+		}
+
+		// Find word prefix before cursor on current line to replace
+		startCol := curCol
+		for startCol > 0 {
+			r := rune(lineText[startCol-1])
+			if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' && r != '#' && r != '$' {
+				break
+			}
+			startCol--
+		}
+
+		newLine := lineText[:startCol] + insertVal + lineText[curCol:]
+		lines[curLine] = newLine
+		tab.Textarea.SetValue(strings.Join(lines, "\n"))
+
+		// Move cursor to target column
+		targetCol := startCol + len(insertVal)
+		tab.Textarea.SetCursor(targetCol)
+	}
+
+	m.CompletionActive = false
+	m.Completions = nil
+	m.SelectedCompletion = 0
+	tab.Modified = true
+	return true
+}
+
+func (m Model) renderCompletionPopup() string {
+	if !m.CompletionActive || len(m.Completions) == 0 {
+		return ""
+	}
+
+	maxVisible := 6
+	total := len(m.Completions)
+	startIdx := 0
+	if m.SelectedCompletion >= maxVisible {
+		startIdx = m.SelectedCompletion - maxVisible + 1
+	}
+	endIdx := startIdx + maxVisible
+	if endIdx > total {
+		endIdx = total
+	}
+
+	headerStyle := lipgloss.NewStyle().
+		Foreground(theme.ColorSecondary).
+		Bold(true)
+
+	selectedStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("#264F78")).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Bold(true)
+
+	normalStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#CCCCCC"))
+
+	var rows []string
+	rows = append(rows, headerStyle.Render("── LSP Suggestions (Tab/Enter ↵) ──"))
+
+	for i := startIdx; i < endIdx; i++ {
+		item := m.Completions[i]
+
+		var badge string
+		switch item.Kind {
+		case lsp.CompletionItemKindClass:
+			badge = lipgloss.NewStyle().Foreground(lipgloss.Color("#569CD6")).Bold(true).Render("[TBL]")
+		case lsp.CompletionItemKindInterface:
+			badge = lipgloss.NewStyle().Foreground(lipgloss.Color("#4EC9B0")).Bold(true).Render("[VIEW]")
+		case lsp.CompletionItemKindField:
+			badge = lipgloss.NewStyle().Foreground(lipgloss.Color("#B5CEA8")).Bold(true).Render("[COL]")
+		case lsp.CompletionItemKindKeyword:
+			badge = lipgloss.NewStyle().Foreground(lipgloss.Color("#C586C0")).Bold(true).Render("[KWD]")
+		case lsp.CompletionItemKindFunction:
+			badge = lipgloss.NewStyle().Foreground(lipgloss.Color("#DCDCAA")).Bold(true).Render("[FUNC]")
+		case lsp.CompletionItemKindModule:
+			badge = lipgloss.NewStyle().Foreground(lipgloss.Color("#CE9178")).Bold(true).Render("[SCH]")
+		case lsp.CompletionItemKindSnippet:
+			badge = lipgloss.NewStyle().Foreground(lipgloss.Color("#9CDCFE")).Bold(true).Render("[SNP]")
+		default:
+			badge = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("[SQL]")
+		}
+
+		label := item.Label
+		if len(label) > 22 {
+			label = label[:19] + "..."
+		}
+		detail := item.Detail
+		if len(detail) > 18 {
+			detail = detail[:15] + "..."
+		}
+
+		lineContent := fmt.Sprintf("%s %-22s %s", badge, label, detail)
+
+		if i == m.SelectedCompletion {
+			rows = append(rows, selectedStyle.Render(" ▶ "+lineContent+" "))
+		} else {
+			rows = append(rows, normalStyle.Render("   "+lineContent+" "))
+		}
+	}
+
+	footer := lipgloss.NewStyle().Foreground(lipgloss.Color("#777777")).
+		Render(fmt.Sprintf(" [Esc: Close]          ▲ %d/%d ▼ ", m.SelectedCompletion+1, total))
+	rows = append(rows, footer)
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(theme.ColorSecondary).
+		Background(lipgloss.Color("#1E1E1E")).
+		Padding(0, 1)
+
+	return boxStyle.Render(strings.Join(rows, "\n"))
 }
 
 func (m *Model) GetCursorPosition() (int, int) {
@@ -634,7 +843,7 @@ func (m *Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.handleShiftArrow("end")
 			return *m, nil
 
-		case "f2", "ctrl+b", "ctrl+g", "ctrl+space", "alt+v", "√":
+		case "ctrl+b", "ctrl+g", "alt+v", "√":
 			// Toggle Visual Selection Mode
 			tab.VisualMode = !tab.VisualMode
 			if tab.VisualMode {
@@ -650,13 +859,47 @@ func (m *Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 			return *m, nil
 
-		case "down", "up", "left", "right":
+		case "ctrl+space", "ctrl+@", "ctrl+.", "alt+.", "ctrl+j", "alt+space", "f2":
+			m.TriggerCompletion(true)
+			return *m, nil
+
+		case "up", "ctrl+p":
+			if m.CompletionActive && len(m.Completions) > 0 {
+				m.SelectedCompletion--
+				if m.SelectedCompletion < 0 {
+					m.SelectedCompletion = len(m.Completions) - 1
+				}
+				return *m, nil
+			}
 			if tab.VisualMode {
-				m.handleShiftArrow(keyStr)
+				m.handleShiftArrow("up")
 				return *m, nil
 			}
 			if tab.SelectionExist {
 				tab.SelectionExist = false
+			}
+
+		case "down":
+			if m.CompletionActive && len(m.Completions) > 0 {
+				m.SelectedCompletion++
+				if m.SelectedCompletion >= len(m.Completions) {
+					m.SelectedCompletion = 0
+				}
+				return *m, nil
+			}
+			if tab.VisualMode {
+				m.handleShiftArrow("down")
+				return *m, nil
+			}
+			if tab.SelectionExist {
+				tab.SelectionExist = false
+			}
+
+		case "tab", "enter":
+			if m.CompletionActive && len(m.Completions) > 0 {
+				if m.AcceptCompletion() {
+					return *m, nil
+				}
 			}
 
 		case "f5", "ctrl+e":
@@ -694,12 +937,24 @@ func (m *Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 
 		case "esc":
+			if m.CompletionActive {
+				m.CompletionActive = false
+				m.Completions = nil
+				return *m, nil
+			}
 			if tab.SelectionExist || tab.VisualMode {
 				m.ClearSelection()
 				return *m, nil
 			}
 
 		case "ctrl+n":
+			if m.CompletionActive && len(m.Completions) > 0 {
+				m.SelectedCompletion++
+				if m.SelectedCompletion >= len(m.Completions) {
+					m.SelectedCompletion = 0
+				}
+				return *m, nil
+			}
 			m.NewTab("", "")
 			return *m, nil
 
@@ -742,6 +997,23 @@ func (m *Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.Tabs[m.ActiveIndex].Textarea, cmd = m.Tabs[m.ActiveIndex].Textarea.Update(msg)
 		cmds = append(cmds, cmd)
+
+		// Auto-trigger completion on '.' or while typing identifiers
+		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			keyStr := keyMsg.String()
+			if keyStr == "." {
+				m.TriggerCompletion(false)
+			} else if len(keyStr) == 1 && (unicode.IsLetter(rune(keyStr[0])) || unicode.IsDigit(rune(keyStr[0])) || keyStr[0] == '_') {
+				m.TriggerCompletion(false)
+			} else if m.CompletionActive {
+				if keyStr == "backspace" {
+					m.TriggerCompletion(false)
+				} else if keyStr == " " || keyStr == "\n" {
+					m.CompletionActive = false
+					m.Completions = nil
+				}
+			}
+		}
 	}
 
 	return *m, tea.Batch(cmds...)
@@ -780,6 +1052,12 @@ func (m Model) renderHighlightedView(tab *TabInfo) string {
 				cChar := string(runes[curCol : curCol+1])
 				after := string(runes[curCol+1:])
 				renderedLines = append(renderedLines, numStr+syntax.HighlightLine(before)+cursorStyle.Render(cChar)+syntax.HighlightLine(after))
+			}
+
+			// Render inline autocomplete popup directly under current line
+			if m.CompletionActive && len(m.Completions) > 0 {
+				popup := m.renderCompletionPopup()
+				renderedLines = append(renderedLines, popup)
 			}
 		} else {
 			renderedLines = append(renderedLines, numStr+syntax.HighlightLine(line))

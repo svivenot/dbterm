@@ -19,6 +19,18 @@ IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = 'audit')
     EXEC('CREATE SCHEMA audit');
 GO
 
+-- Drop tables in reverse dependency order if re-running
+IF OBJECT_ID('sales.OrderItems', 'U') IS NOT NULL DROP TABLE sales.OrderItems;
+IF OBJECT_ID('sales.Orders', 'U') IS NOT NULL DROP TABLE sales.Orders;
+IF OBJECT_ID('inventory.Products', 'U') IS NOT NULL DROP TABLE inventory.Products;
+IF OBJECT_ID('inventory.Categories', 'U') IS NOT NULL DROP TABLE inventory.Categories;
+IF OBJECT_ID('inventory.Suppliers', 'U') IS NOT NULL DROP TABLE inventory.Suppliers;
+IF OBJECT_ID('hr.Employees', 'U') IS NOT NULL DROP TABLE hr.Employees;
+IF OBJECT_ID('hr.Departments', 'U') IS NOT NULL DROP TABLE hr.Departments;
+IF OBJECT_ID('sales.Customers', 'U') IS NOT NULL DROP TABLE sales.Customers;
+IF OBJECT_ID('audit.ActivityLogs', 'U') IS NOT NULL DROP TABLE audit.ActivityLogs;
+GO
+
 -- 1. Departments Table
 IF OBJECT_ID('hr.Departments', 'U') IS NOT NULL DROP TABLE hr.Departments;
 CREATE TABLE hr.Departments (

@@ -61,6 +61,12 @@
 - **Embedded Schema-Aware AI SQL Generator (`Ctrl+K` / `F4`)**:
   - Zero-setup offline text-to-SQL generation with **Defog SQLCoder-7B-2 (Q4)** & **Qwen 2.5 Coder 3B/7B**.
   - Dynamic schema tokenizer (no accents, snake_case/camelCase extraction) and auto foreign key join resolution.
+- **Embedded SQL Language Server (LSP) & Smart Autocomplete (`Ctrl+.` / `Ctrl+J` / `F2`)**:
+  - Live schema-aware completion for **Tables**, **Views**, **Schemas**, and **Columns** with full data types and primary key indicators (`🔑`).
+  - **Smart Alias Resolution**: Resolves aliases in real time (e.g. `FROM sales.Customers c` $\rightarrow$ typing `c.` completes `c.CustomerID`, `c.CompanyName`).
+  - **Auto Join Predicates**: Automatically suggests relational join conditions on `JOIN ... ON` (e.g. `c.CustomerID = o.CustomerID`).
+  - Context-aware SQL clause filtering (FROM/JOIN $\rightarrow$ tables; SELECT/WHERE $\rightarrow$ columns & functions).
+  - Hover documentation with table DDL previews and function signatures.
 - **Multi-Format Export Dialog (`e` on results / Ctrl+E)**:
   - Export query results directly to **Excel (.xlsx)**, **CSV**, **JSON**, **Markdown**, **HTML**, or **Plain Text**.
 - **Full Mouse Navigation**: Focus panes by clicking, resize sidebars by dragging, double-click to connect servers, and right-click for context menus.
@@ -106,6 +112,7 @@ go run ./cmd/seed/main.go
 | Shortcut | Description |
 | :--- | :--- |
 | **`F5`** / **`Ctrl + E`** | Execute query or selected text (*SSMS standard*) |
+| **`Ctrl + .`** / **`Ctrl + J`** / **`F2`** | Trigger LSP SQL Autocompletion (*macOS compatible*) |
 | **`Ctrl + K`** / **`F4`** | Open Embedded AI SQL Assistant (*Offline Text-to-SQL*) |
 | **`F8`** | Toggle Object Explorer sidebar visibility |
 | **`Tab`** / **`Shift + Tab`** | Cycle pane focus (Explorer $\rightarrow$ Editor $\rightarrow$ Results) |

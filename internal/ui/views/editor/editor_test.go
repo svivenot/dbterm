@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"dbterm/internal/lsp"
 )
 
 func TestEditorTabs(t *testing.T) {
@@ -180,3 +182,51 @@ func TestOpenFileAndSave(t *testing.T) {
 		t.Errorf("Expected modal title in view output, got:\n%s", view)
 	}
 }
+
+func TestEditor_LSPAutocompletion(t *testing.T) {
+	ed := New("SELECT * FROM sales.")
+	ed.SetSize(80, 24)
+
+	server := lsp.NewServer()
+	server.GetCatalog().AllTables = append(server.GetCatalog().AllTables, lsp.TableMetadata{
+		Database: "SalesDB",
+		Schema:   "sales",
+		Name:     "Customers",
+		Columns: []lsp.ColumnMetadata{
+			{Name: "CustomerID", DataType: "nvarchar(10)", IsPrimaryKey: true},
+		},
+	})
+	server.GetCatalog().Schemas = []string{"sales"}
+
+	client := lsp.NewClient(server)
+	ed.SetLSPClient(client)
+
+	// Trigger completion
+	ed.TriggerCompletion(true)
+	if !ed.CompletionActive {
+		t.Fatalf("expected CompletionActive to be true")
+	}
+	if len(ed.Completions) == 0 {
+		t.Fatalf("expected completions for 'sales.', got 0")
+	}
+
+	// Verify popup rendering
+	view := ed.View()
+	if !strings.Contains(view, "LSP Suggestions") || !strings.Contains(view, "Customers") {
+		t.Errorf("expected autocomplete popup in view, got:\n%s", view)
+	}
+
+	// Accept completion
+	accepted := ed.AcceptCompletion()
+	if !accepted {
+		t.Fatalf("expected AcceptCompletion to return true")
+	}
+	if ed.CompletionActive {
+		t.Errorf("expected CompletionActive to be false after accepting")
+	}
+	query := ed.GetCurrentQuery()
+	if !strings.Contains(query, "Customers") {
+		t.Errorf("expected inserted 'Customers' in query, got: %s", query)
+	}
+}
+

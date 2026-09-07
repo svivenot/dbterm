@@ -62,6 +62,7 @@ func (m Model) View() string {
 	shortcuts := [][]string{
 		{"F5 / Ctrl+E", "Execute query or selected text (SSMS standard)"},
 		{"Ctrl+K / F4", "Open Embedded AI SQL Assistant (Offline Text-to-SQL)"},
+		{"Ctrl+. / Ctrl+J / F2", "LSP SQL Autocomplete (Tables, Columns, Keywords, Joins)"},
 		{"Esc (Executing)", "Cancel active running query"},
 		{"F8", "Toggle Object Explorer sidebar visibility"},
 		{"Tab / Shift+Tab", "Cycle focus (Explorer -> Editor -> Results)"},

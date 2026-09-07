@@ -12,5 +12,21 @@ services:
     volumes:
       - mssql_data:/var/opt/mssql
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: dbterm-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./testenv/postgres/init:/docker-entrypoint-initdb.d:ro
+
 volumes:
   mssql_data:
+  postgres_data:
+

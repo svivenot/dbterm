@@ -3,25 +3,39 @@
   "connections": [
     {
       "id": "mssql-local-sales",
-      "name": "MS SQL - SalesDB (Local SA)",
+      "name": "MS SQL - SalesDB (Docker)",
       "group": "Local / Docker",
       "driver": "mssql",
       "host": "localhost",
       "port": 1433,
       "database": "SalesDB",
       "user": "sa",
-      "auth_type": "keyring"
+      "auth_type": "sql",
+      "password": "Password123!"
     },
     {
-      "id": "postgres-sample",
-      "name": "PostgreSQL - Sample DB",
+      "id": "mssql-local-master",
+      "name": "MS SQL - Master (Docker)",
+      "group": "Local / Docker",
+      "driver": "mssql",
+      "host": "localhost",
+      "port": 1433,
+      "database": "master",
+      "user": "sa",
+      "auth_type": "sql",
+      "password": "Password123!"
+    },
+    {
+      "id": "postgres-local",
+      "name": "PostgreSQL - Local (Docker)",
       "group": "Local / Docker",
       "driver": "postgres",
       "host": "localhost",
       "port": 5432,
       "database": "postgres",
       "user": "postgres",
-      "auth_type": "keyring",
+      "auth_type": "sql",
+      "password": "postgres",
       "ssl_mode": "disable"
     },
     {
@@ -33,7 +47,8 @@
       "port": 1521,
       "database": "ORCLPDB1",
       "user": "system",
-      "auth_type": "keyring"
+      "auth_type": "sql",
+      "password": "oracle"
     },
     {
       "id": "mssql-enterprise-sample",
@@ -50,9 +65,8 @@
   ],
   "ai": {
     "enabled": true,
-    "provider": "ollama",
-    "ollama_host": "http://localhost:11434",
-    "model": "qwen2.5-coder:1.5b",
-    "auto_start": true
+    "provider": "embedded",
+    "model_name": "qwen2.5-coder-1.5b-instruct",
+    "include_schema": true
   }
 }
