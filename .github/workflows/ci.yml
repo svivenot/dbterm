@@ -18,6 +18,12 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          check-latest: true
+
+      - name: Install Linux GUI Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libgl1-mesa-dev xorg-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev libwayland-dev libxkbcommon-dev
 
       - name: Run Tests
         run: go test -v ./...
@@ -29,3 +35,4 @@ jobs:
           GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./cmd/dbterm
           GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o /dev/null ./cmd/dbterm
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /dev/null ./cmd/dbterm
+          go build -o /dev/null ./cmd/dbterm-gui
