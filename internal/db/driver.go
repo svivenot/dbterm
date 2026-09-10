@@ -85,6 +85,21 @@ func splitSQLBatches(query string) []string {
 	return batches
 }
 
+// formatMSSQLGuid renders a SQL Server uniqueidentifier (16 raw bytes, whose
+// first three groups are stored little-endian) as the canonical uppercase GUID
+// string, matching how SSMS displays it.
+func formatMSSQLGuid(b []byte) string {
+	if len(b) != 16 {
+		return string(b)
+	}
+	return fmt.Sprintf("%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X",
+		b[3], b[2], b[1], b[0],
+		b[5], b[4],
+		b[7], b[6],
+		b[8], b[9],
+		b[10], b[11], b[12], b[13], b[14], b[15])
+}
+
 // Helper to execute a query against *sql.DB and populate *QueryResult
 func executeSQL(ctx context.Context, db *sql.DB, query string) (*QueryResult, error) {
 	startTime := time.Now()
@@ -219,6 +234,7 @@ func executeSingleSQL(ctx context.Context, db *sql.DB, query string) (*QueryResu
 		return res, err
 	}
 	res.Columns = cols
+	colTypes, _ := rows.ColumnTypes()
 
 	numCols := len(cols)
 	for rows.Next() {
@@ -241,7 +257,14 @@ func executeSingleSQL(ctx context.Context, db *sql.DB, query string) (*QueryResu
 			} else {
 				switch v := val.(type) {
 				case []byte:
-					rowStrings[i] = string(v)
+					// SQL Server returns a uniqueidentifier as 16 raw bytes; render
+					// it as a canonical GUID string instead of unreadable binary.
+					if i < len(colTypes) && len(v) == 16 &&
+						strings.EqualFold(colTypes[i].DatabaseTypeName(), "UNIQUEIDENTIFIER") {
+						rowStrings[i] = formatMSSQLGuid(v)
+					} else {
+						rowStrings[i] = string(v)
+					}
 				case time.Time:
 					rowStrings[i] = v.Format("2006-01-02 15:04:05")
 				default:
