@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -31,25 +32,27 @@ const (
 	TotalFields
 )
 
+// textFields lists, in tab order, the fields backed by a bubbles textinput.
+// FieldDriver and FieldAuthType are choice toggles handled manually.
+var textFields = []FormField{
+	FieldName, FieldGroup, FieldHost, FieldPort,
+	FieldDatabase, FieldUser, FieldPassword, FieldDomain, FieldPassEntry,
+}
+
 type FormModal struct {
 	Active       bool
 	IsEdit       bool
 	ProfileID    string
 	FocusedField FormField
 
-	Name        string
-	Group       string
 	DriverIdx   int // 0: mssql, 1: postgres, 2: oracle
-	Host        string
-	Port        string
-	Database    string
-	User        string
 	AuthTypeIdx int // 0: keyring, 1: sql, 2: windows, 3: pass, 4: env
-	Password    string
-	Domain      string
-	PassEntry   string
 
-	CursorPos    int
+	// Text fields are delegated to bubbles/textinput, which handles rune-aware
+	// editing, cursor navigation, horizontal windowing, clipboard paste, and
+	// password masking natively (no hand-rolled byte slicing).
+	inputs map[FormField]*textinput.Model
+
 	ErrorMessage string
 	Width        int
 	Height       int
@@ -72,6 +75,41 @@ func NewFormModal() FormModal {
 	}
 }
 
+// newTextInput builds a textinput configured for this form's look & feel.
+func newTextInput(value string, secret bool) *textinput.Model {
+	ti := textinput.New()
+	ti.Prompt = ""
+	ti.CharLimit = 512
+	ti.Width = 40
+	ti.SetValue(value)
+	if secret {
+		ti.EchoMode = textinput.EchoPassword
+		ti.EchoCharacter = '*'
+	}
+	return &ti
+}
+
+// buildInputs (re)creates every text input from the given values and focuses the
+// currently selected field.
+func (f *FormModal) buildInputs(values map[FormField]string) {
+	f.inputs = make(map[FormField]*textinput.Model, len(textFields))
+	for _, field := range textFields {
+		f.inputs[field] = newTextInput(values[field], field == FieldPassword)
+	}
+	f.updateFocus()
+}
+
+func (f *FormModal) updateFocus() {
+	for field, in := range f.inputs {
+		if field == f.FocusedField {
+			in.Focus()
+			in.CursorEnd()
+		} else {
+			in.Blur()
+		}
+	}
+}
+
 func (f *FormModal) SetSize(w, h int) {
 	f.Width = w
 	f.Height = h
@@ -82,21 +120,18 @@ func (f *FormModal) OpenNew() {
 	f.IsEdit = false
 	f.ProfileID = ""
 	f.FocusedField = FieldName
-
-	f.Name = "New Connection"
-	f.Group = "General"
 	f.DriverIdx = 0
-	f.Host = "localhost"
-	f.Port = "1433"
-	f.Database = "SalesDB"
-	f.User = "sa"
 	f.AuthTypeIdx = 0 // Keyring default for best security
-	f.Password = ""
-	f.Domain = ""
-	f.PassEntry = ""
-
-	f.CursorPos = len(f.Name)
 	f.ErrorMessage = ""
+
+	f.buildInputs(map[FormField]string{
+		FieldName:     "New Connection",
+		FieldGroup:    "General",
+		FieldHost:     "localhost",
+		FieldPort:     "1433",
+		FieldDatabase: "SalesDB",
+		FieldUser:     "sa",
+	})
 }
 
 func (f *FormModal) OpenEdit(p *config.ConnectionProfile) {
@@ -108,9 +143,7 @@ func (f *FormModal) OpenEdit(p *config.ConnectionProfile) {
 	f.IsEdit = true
 	f.ProfileID = p.ID
 	f.FocusedField = FieldName
-
-	f.Name = p.Name
-	f.Group = p.GetGroup()
+	f.ErrorMessage = ""
 
 	// Driver idx
 	f.DriverIdx = 0
@@ -121,14 +154,10 @@ func (f *FormModal) OpenEdit(p *config.ConnectionProfile) {
 		f.DriverIdx = 2
 	}
 
-	f.Host = p.Host
-	if p.Port > 0 {
-		f.Port = strconv.Itoa(p.Port)
-	} else {
-		f.Port = f.getDefaultPort()
+	port := strconv.Itoa(p.Port)
+	if p.Port <= 0 {
+		port = f.getDefaultPort()
 	}
-	f.Database = p.Database
-	f.User = p.User
 
 	// AuthType idx
 	f.AuthTypeIdx = 0
@@ -139,25 +168,34 @@ func (f *FormModal) OpenEdit(p *config.ConnectionProfile) {
 		}
 	}
 
-	f.Password = p.Password
+	// Resolve the password for editing (keyring lookup / AES decryption).
+	password := p.Password
 	if p.AuthType == config.AuthTypeKeyring {
 		if pass, err := config.GetFromKeyring(p.ID); err == nil {
-			f.Password = pass
+			password = pass
 		}
 	} else if config.IsEncrypted(p.Password) {
 		if dec, err := config.DecryptPassword(p.Password); err == nil {
-			f.Password = dec
+			password = dec
 		}
 	}
 
-	f.Domain = p.Domain
-	f.PassEntry = p.PassEntry
+	passEntry := p.PassEntry
 	if p.PasswordEnv != "" {
-		f.PassEntry = p.PasswordEnv
+		passEntry = p.PasswordEnv
 	}
 
-	f.CursorPos = len(f.Name)
-	f.ErrorMessage = ""
+	f.buildInputs(map[FormField]string{
+		FieldName:      p.Name,
+		FieldGroup:     p.GetGroup(),
+		FieldHost:      p.Host,
+		FieldPort:      port,
+		FieldDatabase:  p.Database,
+		FieldUser:      p.User,
+		FieldPassword:  password,
+		FieldDomain:    p.Domain,
+		FieldPassEntry: passEntry,
+	})
 }
 
 func (f *FormModal) Close() {
@@ -184,50 +222,15 @@ func (f *FormModal) getActiveAuthType() config.AuthType {
 }
 
 func (f *FormModal) getFieldValue(field FormField) string {
-	switch field {
-	case FieldName:
-		return f.Name
-	case FieldGroup:
-		return f.Group
-	case FieldHost:
-		return f.Host
-	case FieldPort:
-		return f.Port
-	case FieldDatabase:
-		return f.Database
-	case FieldUser:
-		return f.User
-	case FieldPassword:
-		return f.Password
-	case FieldDomain:
-		return f.Domain
-	case FieldPassEntry:
-		return f.PassEntry
-	default:
-		return ""
+	if in, ok := f.inputs[field]; ok {
+		return in.Value()
 	}
+	return ""
 }
 
 func (f *FormModal) setFieldValue(field FormField, val string) {
-	switch field {
-	case FieldName:
-		f.Name = val
-	case FieldGroup:
-		f.Group = val
-	case FieldHost:
-		f.Host = val
-	case FieldPort:
-		f.Port = val
-	case FieldDatabase:
-		f.Database = val
-	case FieldUser:
-		f.User = val
-	case FieldPassword:
-		f.Password = val
-	case FieldDomain:
-		f.Domain = val
-	case FieldPassEntry:
-		f.PassEntry = val
+	if in, ok := f.inputs[field]; ok {
+		in.SetValue(val)
 	}
 }
 
@@ -236,111 +239,82 @@ func (f FormModal) Update(msg tea.Msg) (FormModal, *config.ConnectionProfile, bo
 		return f, nil, false
 	}
 
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "esc":
-			f.Close()
-			return f, nil, false
-
-		case "tab", "down":
-			f.nextField()
-			return f, nil, false
-
-		case "shift+tab", "up":
-			f.prevField()
-			return f, nil, false
-
-		case "enter":
-			if f.FocusedField == FieldCancelButton {
-				f.Close()
-				return f, nil, false
-			}
-			if f.FocusedField == FieldSaveButton || f.FocusedField == FieldPassword {
-				profile, err := f.validateAndBuildProfile()
-				if err != nil {
-					f.ErrorMessage = err.Error()
-					return f, nil, false
-				}
-				f.Close()
-				return f, profile, true
-			}
-			f.nextField()
-			return f, nil, false
-
-		case "left":
-			if f.FocusedField == FieldDriver {
-				f.DriverIdx = (f.DriverIdx - 1 + len(Drivers)) % len(Drivers)
-				f.Port = f.getDefaultPort()
-				return f, nil, false
-			}
-			if f.FocusedField == FieldAuthType {
-				f.AuthTypeIdx = (f.AuthTypeIdx - 1 + len(AuthTypes)) % len(AuthTypes)
-				return f, nil, false
-			}
-			if f.CursorPos > 0 {
-				f.CursorPos--
-			}
-			return f, nil, false
-
-		case "right", " ":
-			if f.FocusedField == FieldDriver {
-				f.DriverIdx = (f.DriverIdx + 1) % len(Drivers)
-				f.Port = f.getDefaultPort()
-				return f, nil, false
-			}
-			if f.FocusedField == FieldAuthType {
-				f.AuthTypeIdx = (f.AuthTypeIdx + 1) % len(AuthTypes)
-				return f, nil, false
-			}
-			val := f.getFieldValue(f.FocusedField)
-			if msg.String() == "right" {
-				if f.CursorPos < len(val) {
-					f.CursorPos++
-				}
-			} else {
-				// Space character insertion
-				val = val[:f.CursorPos] + " " + val[f.CursorPos:]
-				f.setFieldValue(f.FocusedField, val)
-				f.CursorPos++
-			}
-			return f, nil, false
-
-		case "backspace":
-			val := f.getFieldValue(f.FocusedField)
-			if len(val) > 0 && f.CursorPos > 0 {
-				val = val[:f.CursorPos-1] + val[f.CursorPos:]
-				f.setFieldValue(f.FocusedField, val)
-				f.CursorPos--
-			}
-			return f, nil, false
-
-		default:
-			if len(msg.String()) == 1 {
-				val := f.getFieldValue(f.FocusedField)
-				val = val[:f.CursorPos] + msg.String() + val[f.CursorPos:]
-				f.setFieldValue(f.FocusedField, val)
-				f.CursorPos++
-			}
-			return f, nil, false
-		}
+	keyMsg, isKey := msg.(tea.KeyMsg)
+	if !isKey {
+		return f, nil, false
 	}
 
+	switch keyMsg.String() {
+	case "esc":
+		f.Close()
+		return f, nil, false
+
+	case "tab", "down":
+		f.nextField()
+		return f, nil, false
+
+	case "shift+tab", "up":
+		f.prevField()
+		return f, nil, false
+
+	case "enter":
+		if f.FocusedField == FieldCancelButton {
+			f.Close()
+			return f, nil, false
+		}
+		if f.FocusedField == FieldSaveButton || f.FocusedField == FieldPassword {
+			profile, err := f.validateAndBuildProfile()
+			if err != nil {
+				f.ErrorMessage = err.Error()
+				return f, nil, false
+			}
+			f.Close()
+			return f, profile, true
+		}
+		f.nextField()
+		return f, nil, false
+	}
+
+	// Choice toggles (Driver / Auth Method): left/right/space cycle the value.
+	if f.FocusedField == FieldDriver || f.FocusedField == FieldAuthType {
+		switch keyMsg.String() {
+		case "left":
+			f.cycleChoice(-1)
+		case "right", " ":
+			f.cycleChoice(1)
+		}
+		return f, nil, false
+	}
+
+	// Text fields: delegate everything else (runes, paste, cursor moves,
+	// backspace, home/end, ...) to the focused textinput.
+	if in, ok := f.inputs[f.FocusedField]; ok {
+		updated, _ := in.Update(msg)
+		*in = updated
+	}
 	return f, nil, false
+}
+
+func (f *FormModal) cycleChoice(dir int) {
+	switch f.FocusedField {
+	case FieldDriver:
+		f.DriverIdx = (f.DriverIdx + dir + len(Drivers)) % len(Drivers)
+		f.setFieldValue(FieldPort, f.getDefaultPort())
+	case FieldAuthType:
+		f.AuthTypeIdx = (f.AuthTypeIdx + dir + len(AuthTypes)) % len(AuthTypes)
+	}
 }
 
 func (f *FormModal) nextField() {
 	f.FocusedField = (f.FocusedField + 1) % TotalFields
 	f.adjustFieldVisibility(true)
-	val := f.getFieldValue(f.FocusedField)
-	f.CursorPos = len(val)
+	f.updateFocus()
 }
 
 func (f *FormModal) prevField() {
 	f.FocusedField = (f.FocusedField - 1 + TotalFields) % TotalFields
 	f.adjustFieldVisibility(false)
-	val := f.getFieldValue(f.FocusedField)
-	f.CursorPos = len(val)
+	f.updateFocus()
 }
 
 func (f *FormModal) adjustFieldVisibility(forward bool) {
@@ -364,29 +338,31 @@ func (f *FormModal) adjustFieldVisibility(forward bool) {
 }
 
 func (f *FormModal) validateAndBuildProfile() (*config.ConnectionProfile, error) {
-	name := strings.TrimSpace(f.Name)
+	name := strings.TrimSpace(f.getFieldValue(FieldName))
 	if name == "" {
 		return nil, fmt.Errorf("connection profile name cannot be empty")
 	}
 
-	host := strings.TrimSpace(f.Host)
+	host := strings.TrimSpace(f.getFieldValue(FieldHost))
 	if host == "" {
 		return nil, fmt.Errorf("host cannot be empty")
 	}
 
-	portNum, err := strconv.Atoi(strings.TrimSpace(f.Port))
+	portNum, err := strconv.Atoi(strings.TrimSpace(f.getFieldValue(FieldPort)))
 	if err != nil || portNum <= 0 {
 		return nil, fmt.Errorf("invalid port number")
 	}
 
-	dbName := strings.TrimSpace(f.Database)
+	dbName := strings.TrimSpace(f.getFieldValue(FieldDatabase))
 	if dbName == "" {
 		return nil, fmt.Errorf("database name cannot be empty")
 	}
 
-	user := strings.TrimSpace(f.User)
+	user := strings.TrimSpace(f.getFieldValue(FieldUser))
 	driver := Drivers[f.DriverIdx]
 	authType := f.getActiveAuthType()
+	password := f.getFieldValue(FieldPassword)
+	passEntry := strings.TrimSpace(f.getFieldValue(FieldPassEntry))
 
 	id := f.ProfileID
 	if id == "" {
@@ -397,41 +373,41 @@ func (f *FormModal) validateAndBuildProfile() (*config.ConnectionProfile, error)
 	profile := &config.ConnectionProfile{
 		ID:        id,
 		Name:      name,
-		Group:     strings.TrimSpace(f.Group),
+		Group:     strings.TrimSpace(f.getFieldValue(FieldGroup)),
 		Driver:    driver,
 		Host:      host,
 		Port:      portNum,
 		Database:  dbName,
 		User:      user,
 		AuthType:  authType,
-		Domain:    strings.TrimSpace(f.Domain),
-		PassEntry: strings.TrimSpace(f.PassEntry),
+		Domain:    strings.TrimSpace(f.getFieldValue(FieldDomain)),
+		PassEntry: passEntry,
 	}
 
 	if authType == config.AuthTypeEnv {
-		profile.PasswordEnv = strings.TrimSpace(f.PassEntry)
+		profile.PasswordEnv = passEntry
 		profile.PassEntry = ""
 	}
 
 	// Handle password saving with strict encryption & keyring storage
-	if f.Password != "" {
+	if password != "" {
 		if authType == config.AuthTypeKeyring {
-			if err := config.SaveToKeyring(id, f.Password); err == nil {
+			if err := config.SaveToKeyring(id, password); err == nil {
 				profile.Password = "" // Stored exclusively in OS Keychain!
 			} else {
 				// Fallback to AES encrypted if keyring failed
-				enc, _ := config.EncryptPassword(f.Password)
+				enc, _ := config.EncryptPassword(password)
 				profile.Password = enc
 			}
 		} else if authType == config.AuthTypePass || authType == config.AuthTypeEnv {
 			profile.Password = "" // Stored in Unix pass or environment variable
 		} else {
 			// SQL or Windows Auth -> Always encrypt with AES-256-GCM before writing to JSON
-			enc, err := config.EncryptPassword(f.Password)
+			enc, err := config.EncryptPassword(password)
 			if err == nil {
 				profile.Password = enc
 			} else {
-				profile.Password = f.Password
+				profile.Password = password
 			}
 		}
 	}
@@ -449,15 +425,24 @@ func (f FormModal) View() string {
 		modalWidth = f.Width - 6
 	}
 
+	// Size the text inputs to the inner width of the field box.
+	innerW := modalWidth - 32
+	if innerW < 8 {
+		innerW = 8
+	}
+	for _, in := range f.inputs {
+		in.Width = innerW
+	}
+
 	titleText := " ➕ ADD SQL SERVER CONNECTION "
 	if f.IsEdit {
-		titleText = fmt.Sprintf(" ✏️ EDIT CONNECTION: %s ", f.Name)
+		titleText = fmt.Sprintf(" ✏️ EDIT CONNECTION: %s ", f.getFieldValue(FieldName))
 	}
 
 	var b strings.Builder
 	b.WriteString(theme.ModalTitle.Render(titleText) + "\n\n")
 
-	renderInput := func(label string, field FormField, isChoice bool, choiceVal string, isSecret bool) string {
+	renderInput := func(label string, field FormField, isChoice bool, choiceVal string) string {
 		isFocused := (f.FocusedField == field)
 		labelStr := lipgloss.NewStyle().Width(18).Bold(true).Render(label + ":")
 		if isFocused {
@@ -466,51 +451,43 @@ func (f FormModal) View() string {
 			labelStr = "  " + labelStr
 		}
 
-		content := ""
+		var content string
 		if isChoice {
 			content = lipgloss.NewStyle().Background(theme.ColorPrimary).Foreground(lipgloss.Color("#FFF")).Padding(0, 1).Render("◀ " + choiceVal + " ▶")
 		} else {
-			val := f.getFieldValue(field)
-			if isSecret && len(val) > 0 {
-				val = strings.Repeat("•", len(val))
-			}
-
+			borderColor := theme.ColorBorder
 			if isFocused {
-				cursorChar := " "
-				if f.CursorPos < len(val) {
-					cursorChar = string(val[f.CursorPos])
-				}
-				styledCur := lipgloss.NewStyle().Background(theme.ColorPrimary).Foreground(lipgloss.Color("#FFF")).Render(cursorChar)
-				if f.CursorPos < len(val) {
-					content = val[:f.CursorPos] + styledCur + val[f.CursorPos+1:]
-				} else {
-					content = val + styledCur
-				}
-				content = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(theme.ColorPrimary).Padding(0, 1).Width(modalWidth - 28).Render(content)
-			} else {
-				if content == "" {
-					content = val
-				}
-				content = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(theme.ColorBorder).Padding(0, 1).Width(modalWidth - 28).Render(content)
+				borderColor = theme.ColorPrimary
 			}
+			inner := ""
+			if in, ok := f.inputs[field]; ok {
+				inner = in.View()
+			}
+			content = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(borderColor).
+				Padding(0, 1).
+				Width(modalWidth - 28).
+				MaxHeight(3).
+				Render(inner)
 		}
 
 		return lipgloss.JoinHorizontal(lipgloss.Center, labelStr, " ", content) + "\n"
 	}
 
 	// 1. Name & Group
-	b.WriteString(renderInput("Profile Name", FieldName, false, "", false))
-	b.WriteString(renderInput("Folder / Group", FieldGroup, false, "", false))
+	b.WriteString(renderInput("Profile Name", FieldName, false, ""))
+	b.WriteString(renderInput("Folder / Group", FieldGroup, false, ""))
 
 	// 2. Driver & Host & Port
 	driverDisplay := strings.ToUpper(Drivers[f.DriverIdx])
-	b.WriteString(renderInput("Database Driver", FieldDriver, true, driverDisplay, false))
-	b.WriteString(renderInput("Host / IP", FieldHost, false, "", false))
-	b.WriteString(renderInput("Port", FieldPort, false, "", false))
+	b.WriteString(renderInput("Database Driver", FieldDriver, true, driverDisplay))
+	b.WriteString(renderInput("Host / IP", FieldHost, false, ""))
+	b.WriteString(renderInput("Port", FieldPort, false, ""))
 
 	// 3. Database & User
-	b.WriteString(renderInput("Database Name", FieldDatabase, false, "", false))
-	b.WriteString(renderInput("Username", FieldUser, false, "", false))
+	b.WriteString(renderInput("Database Name", FieldDatabase, false, ""))
+	b.WriteString(renderInput("Username", FieldUser, false, ""))
 
 	// 4. Auth & Password
 	authDisplay := "Keychain (Secure OS Vault)"
@@ -524,19 +501,19 @@ func (f FormModal) View() string {
 	case config.AuthTypeEnv:
 		authDisplay = "Environment Variable ($VAR)"
 	}
-	b.WriteString(renderInput("Auth Method", FieldAuthType, true, authDisplay, false))
+	b.WriteString(renderInput("Auth Method", FieldAuthType, true, authDisplay))
 
 	at := f.getActiveAuthType()
 	if at != config.AuthTypePass && at != config.AuthTypeEnv {
-		b.WriteString(renderInput("Password", FieldPassword, false, "", true))
+		b.WriteString(renderInput("Password", FieldPassword, false, ""))
 	}
 
 	if at == config.AuthTypeWindows {
-		b.WriteString(renderInput("Domain (AD)", FieldDomain, false, "", false))
+		b.WriteString(renderInput("Domain (AD)", FieldDomain, false, ""))
 	} else if at == config.AuthTypePass {
-		b.WriteString(renderInput("Pass Entry", FieldPassEntry, false, "", false))
+		b.WriteString(renderInput("Pass Entry", FieldPassEntry, false, ""))
 	} else if at == config.AuthTypeEnv {
-		b.WriteString(renderInput("Env Var Name", FieldPassEntry, false, "", false))
+		b.WriteString(renderInput("Env Var Name", FieldPassEntry, false, ""))
 	}
 
 	b.WriteString("\n")

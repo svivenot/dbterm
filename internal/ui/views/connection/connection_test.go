@@ -91,6 +91,46 @@ func TestConnectionTreeHierarchy(t *testing.T) {
 	}
 }
 
+func TestFormPasteAndMultibyteInput(t *testing.T) {
+	var f FormModal
+	f.OpenNew()
+
+	// focusField selects a text field and moves the input focus to it, as the
+	// backing textinput only accepts keystrokes while focused.
+	focusField := func(field FormField) {
+		f.FocusedField = field
+		f.setFieldValue(field, "")
+		f.updateFocus()
+	}
+
+	// 1. A clipboard paste arrives as a single KeyRunes message carrying every
+	//    pasted rune; the whole string must be inserted.
+	focusField(FieldHost)
+	pasted := "sc-sql-preprod01.swisscaution.local"
+	f, _, _ = f.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(pasted)})
+	if got := f.getFieldValue(FieldHost); got != pasted {
+		t.Fatalf("Expected pasted host %q, got %q", pasted, got)
+	}
+
+	// 2. The password field stores the real value (masking is display-only).
+	focusField(FieldPassword)
+	f, _, _ = f.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p@ssw0rd!")})
+	if got := f.getFieldValue(FieldPassword); got != "p@ssw0rd!" {
+		t.Fatalf("Expected password %q, got %q", "p@ssw0rd!", got)
+	}
+	// The rendered view must never leak the plaintext password.
+	if view := f.View(); strings.Contains(view, "p@ssw0rd!") {
+		t.Errorf("Password plaintext leaked into rendered view")
+	}
+
+	// 3. A multibyte character must be inserted whole (no split bytes).
+	focusField(FieldName)
+	f, _, _ = f.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'é'}})
+	if got := f.getFieldValue(FieldName); got != "é" {
+		t.Fatalf("Expected name %q, got %q", "é", got)
+	}
+}
+
 func TestAddEditDeleteConnection(t *testing.T) {
 	cfg := &config.Config{
 		Connections: []config.ConnectionProfile{
@@ -121,11 +161,11 @@ func TestAddEditDeleteConnection(t *testing.T) {
 	}
 
 	// 2. Build profile and save
-	m.FormModal.Name = "Oracle Cloud"
+	m.FormModal.setFieldValue(FieldName, "Oracle Cloud")
 	m.FormModal.DriverIdx = 2 // Oracle
-	m.FormModal.Port = "1521"
-	m.FormModal.Database = "ORCL"
-	m.FormModal.User = "system"
+	m.FormModal.setFieldValue(FieldPort, "1521")
+	m.FormModal.setFieldValue(FieldDatabase, "ORCL")
+	m.FormModal.setFieldValue(FieldUser, "system")
 	m.FormModal.FocusedField = FieldSaveButton
 
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
