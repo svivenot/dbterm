@@ -10,10 +10,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"dbterm/internal/db"
+	"dbterm/internal/ui/syntax"
 	"dbterm/internal/ui/theme"
 )
 
@@ -39,6 +42,9 @@ type Model struct {
 	Focused        bool
 	InspectorOpen  bool
 	InspectorText  string
+	Inspector      viewport.Model // scrollable cell-value inspector (full screen)
+	ScreenWidth    int            // full app width, for the inspector overlay
+	ScreenHeight   int            // full app height, for the inspector overlay
 	StatusMessage  string
 	StatusMsgTimer time.Time
 	SortCol        int
@@ -64,6 +70,76 @@ func New() Model {
 func (m *Model) SetSize(w, h int) {
 	m.Width = w
 	m.Height = h
+}
+
+// SetScreenSize records the full application dimensions so the cell inspector
+// can render as a full-screen overlay rather than being confined to the pane.
+func (m *Model) SetScreenSize(w, h int) {
+	m.ScreenWidth = w
+	m.ScreenHeight = h
+	if m.InspectorOpen {
+		m.refreshInspectorViewport()
+	}
+}
+
+// inspectorDims returns the inner viewport size for the inspector overlay.
+func (m *Model) inspectorDims() (int, int) {
+	w := m.ScreenWidth
+	h := m.ScreenHeight
+	if w <= 0 {
+		w = m.Width
+	}
+	if h <= 0 {
+		h = m.Height
+	}
+	vpW := w - 10
+	if vpW < 20 {
+		vpW = 20
+	}
+	vpH := h - 10
+	if vpH < 5 {
+		vpH = 5
+	}
+	return vpW, vpH
+}
+
+// refreshInspectorViewport re-wraps the inspector content to the current width
+// and resizes the viewport (called on open and on window resize).
+func (m *Model) refreshInspectorViewport() {
+	vpW, vpH := m.inspectorDims()
+	m.Inspector.Width = vpW
+	m.Inspector.Height = vpH
+	wrapped := lipgloss.NewStyle().Width(vpW).Render(m.InspectorText)
+	m.Inspector.SetContent(wrapped)
+}
+
+// openInspector prepares and shows the scrollable full-screen cell inspector.
+// JSON and XML payloads are pretty-printed and syntax-highlighted.
+func (m *Model) openInspector(colName, cellVal string, rowNum int) {
+	trimmed := strings.TrimSpace(cellVal)
+	body := cellVal
+
+	switch {
+	case strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "["):
+		pretty := cellVal
+		var parsed any
+		if err := json.Unmarshal([]byte(cellVal), &parsed); err == nil {
+			if p, err := json.MarshalIndent(parsed, "", "  "); err == nil {
+				pretty = string(p)
+			}
+		}
+		body = syntax.HighlightJSON(pretty)
+	case strings.HasPrefix(trimmed, "<"):
+		body = syntax.HighlightXML(syntax.FormatXML(cellVal))
+	}
+
+	header := theme.StyleFgMuted.Render(fmt.Sprintf("Column: %s (Row %d)", colName, rowNum))
+	m.InspectorText = header + "\n\n" + body
+	vpW, vpH := m.inspectorDims()
+	m.Inspector = viewport.New(vpW, vpH)
+	m.refreshInspectorViewport()
+	m.Inspector.GotoTop()
+	m.InspectorOpen = true
 }
 
 func (m *Model) SetResult(res *db.QueryResult) {
@@ -285,12 +361,12 @@ func (m *Model) HandleMouse(msg tea.MouseMsg, relX, relY int) (Model, tea.Cmd) {
 				// Find which visible column was clicked
 				colWidths := make([]int, len(m.Result.Columns))
 				for i, col := range m.Result.Columns {
-					colWidths[i] = len(col)
+					colWidths[i] = ansi.StringWidth(col)
 				}
 				for r := 0; r < 50 && r < len(m.FilteredRows); r++ {
 					for c, val := range m.FilteredRows[r] {
-						if len(val) > colWidths[c] {
-							colWidths[c] = len(val)
+						if w := ansi.StringWidth(val); w > colWidths[c] {
+							colWidths[c] = w
 						}
 					}
 				}
@@ -345,18 +421,25 @@ func (m *Model) HandleMouse(msg tea.MouseMsg, relX, relY int) (Model, tea.Cmd) {
 }
 
 func (m *Model) Update(msg tea.Msg) (Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.MouseMsg:
-		return m.HandleMouse(msg, msg.X, msg.Y)
-	case tea.KeyMsg:
-		if m.InspectorOpen {
-			switch msg.String() {
+	// When the inspector is open it owns all input: close keys aside, keystrokes
+	// and mouse-wheel events drive the scrollable viewport.
+	if m.InspectorOpen {
+		if km, ok := msg.(tea.KeyMsg); ok {
+			switch km.String() {
 			case "esc", "enter", "q":
 				m.InspectorOpen = false
 				return *m, nil
 			}
-			return *m, nil
 		}
+		var cmd tea.Cmd
+		m.Inspector, cmd = m.Inspector.Update(msg)
+		return *m, cmd
+	}
+
+	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		return m.HandleMouse(msg, msg.X, msg.Y)
+	case tea.KeyMsg:
 
 		if m.Filtering {
 			switch msg.String() {
@@ -435,25 +518,12 @@ func (m *Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 			return *m, nil
 		case "enter", "v":
-			// Open Cell Inspector
+			// Open the scrollable full-screen Cell Inspector.
 			if m.ActiveTab == TabResults && m.Result != nil && len(m.FilteredRows) > 0 {
 				if m.SelectedRow < len(m.FilteredRows) && m.SelectedCol < len(m.Result.Columns) {
 					cellVal := m.FilteredRows[m.SelectedRow][m.SelectedCol]
 					colName := m.Result.Columns[m.SelectedCol]
-
-					// Attempt to pretty-print JSON if applicable
-					formattedVal := cellVal
-					if strings.HasPrefix(strings.TrimSpace(cellVal), "{") || strings.HasPrefix(strings.TrimSpace(cellVal), "[") {
-						var parsed any
-						if err := json.Unmarshal([]byte(cellVal), &parsed); err == nil {
-							if pretty, err := json.MarshalIndent(parsed, "", "  "); err == nil {
-								formattedVal = string(pretty)
-							}
-						}
-					}
-
-					m.InspectorText = fmt.Sprintf("Column: %s (Row %d)\n\n%s", colName, m.SelectedRow+1, formattedVal)
-					m.InspectorOpen = true
+					m.openInspector(colName, cellVal, m.SelectedRow+1)
 				}
 			}
 			return *m, nil
@@ -489,10 +559,8 @@ func (m *Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
-	if m.InspectorOpen {
-		return m.renderInspector()
-	}
-
+	// The inspector renders as a full-screen overlay from the app layer
+	// (see InspectorView); it is intentionally not drawn inside the pane.
 	var b strings.Builder
 
 	// Header Tabs
@@ -537,7 +605,39 @@ func (m Model) View() string {
 		b.WriteString(m.renderGrid())
 	}
 
-	return lipgloss.NewStyle().Width(m.Width).Height(m.Height).Render(b.String())
+	// MaxWidth/MaxHeight are a hard safety net: they clamp the rendered block to
+	// the pane bounds so a single row can never wrap onto a second physical line
+	// (which desynchronizes the renderer and "multiplies" rows on some terminals).
+	return lipgloss.NewStyle().
+		Width(m.Width).Height(m.Height).
+		MaxWidth(m.Width).MaxHeight(m.Height).
+		Render(b.String())
+}
+
+// sanitizeCell replaces control characters (embedded newlines/tabs and raw
+// binary bytes) with spaces, so a single grid row can never inject terminal
+// escape sequences or wrap onto a second physical line.
+func sanitizeCell(s string) string {
+	needs := false
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			needs = true
+			break
+		}
+	}
+	if !needs {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			b.WriteByte(' ')
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func (m Model) renderGrid() string {
@@ -553,10 +653,11 @@ func (m Model) renderGrid() string {
 		return theme.StyleFgMuted.Render("\n  (0 rows returned)")
 	}
 
-	// 1. Calculate column widths
+	// 1. Calculate column widths (by display width, not byte length, so that
+	//    accented/multibyte/wide glyphs do not desynchronize the layout).
 	colWidths := make([]int, len(m.Result.Columns))
 	for i, col := range m.Result.Columns {
-		colWidths[i] = len(col)
+		colWidths[i] = ansi.StringWidth(col)
 	}
 
 	sampleLimit := 100
@@ -567,8 +668,8 @@ func (m Model) renderGrid() string {
 	for r := 0; r < sampleLimit; r++ {
 		row := m.FilteredRows[r]
 		for c, val := range row {
-			if len(val) > colWidths[c] {
-				colWidths[c] = len(val)
+			if w := ansi.StringWidth(sanitizeCell(val)); w > colWidths[c] {
+				colWidths[c] = w
 			}
 		}
 	}
@@ -642,9 +743,9 @@ func (m Model) renderGrid() string {
 		displayName := m.Result.Columns[c]
 		if c == m.SortCol {
 			if m.SortAsc {
-				displayName += " ▲"
+				displayName += " ^"
 			} else {
-				displayName += " ▼"
+				displayName += " v"
 			}
 		}
 		headerCells = append(headerCells, theme.TableHeader.Width(colWidths[c]+2).Render(displayName))
@@ -652,9 +753,9 @@ func (m Model) renderGrid() string {
 
 	if hasRightHidden {
 		moreCount := len(m.Result.Columns) - 1 - visibleCols[len(visibleCols)-1]
-		headerCells = append(headerCells, theme.TableHeader.Render(fmt.Sprintf(" ▶ (+%d)", moreCount)))
+		headerCells = append(headerCells, theme.TableHeader.Render(fmt.Sprintf(" > (+%d)", moreCount)))
 	} else if hasLeftHidden {
-		headerCells = append(headerCells, theme.TableHeader.Render(" ◀"))
+		headerCells = append(headerCells, theme.TableHeader.Render(" <"))
 	}
 
 	gridBuilder.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, headerCells...))
@@ -686,14 +787,14 @@ func (m Model) renderGrid() string {
 		for _, c := range visibleCols {
 			val := ""
 			if c < len(row) {
-				val = row[c]
+				val = sanitizeCell(row[c])
 			}
 			isCellSel := (r == m.SelectedRow && c == m.SelectedCol)
 			cellWidth := colWidths[c] + 2
 
 			displayVal := val
-			if len(displayVal) > colWidths[c] {
-				displayVal = displayVal[:colWidths[c]-1] + "…"
+			if ansi.StringWidth(displayVal) > colWidths[c] {
+				displayVal = ansi.Truncate(displayVal, colWidths[c], "~")
 			}
 
 			var cellStyle lipgloss.Style
@@ -708,7 +809,7 @@ func (m Model) renderGrid() string {
 		}
 
 		if hasRightHidden {
-			rowCells = append(rowCells, theme.TableCell.Render(" …"))
+			rowCells = append(rowCells, theme.TableCell.Render(" >"))
 		}
 
 		gridBuilder.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, rowCells...))
@@ -742,19 +843,33 @@ func (m Model) renderMessages() string {
 	return b.String()
 }
 
-func (m Model) renderInspector() string {
+// InspectorView renders the scrollable cell-value inspector as a full-screen
+// panel. It is placed as an overlay by the app layer.
+func (m Model) InspectorView() string {
+	w := m.ScreenWidth
+	h := m.ScreenHeight
+	if w <= 0 {
+		w = m.Width
+	}
+	if h <= 0 {
+		h = m.Height
+	}
+
 	box := lipgloss.NewStyle().
 		Border(lipgloss.DoubleBorder()).
 		BorderForeground(theme.ColorPrimary).
 		Background(theme.ColorBgDark).
 		Padding(1, 2).
-		Width(m.Width - 6).
-		Height(m.Height - 4)
+		Width(w - 6).
+		Height(h - 4)
+
+	footer := fmt.Sprintf("%3.0f%%   [Up/Down PgUp/PgDn Home/End: Scroll]   [Esc/Enter: Close]",
+		m.Inspector.ScrollPercent()*100)
 
 	content := fmt.Sprintf("%s\n\n%s\n\n%s",
 		theme.ModalTitle.Render("CELL VALUE INSPECTOR"),
-		m.InspectorText,
-		theme.StyleFgMuted.Render("[Esc/Enter: Close]"),
+		m.Inspector.View(),
+		theme.StyleFgMuted.Render(footer),
 	)
 
 	return box.Render(content)

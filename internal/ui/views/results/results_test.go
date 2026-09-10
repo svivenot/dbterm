@@ -6,8 +6,45 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"dbterm/internal/db"
 )
+
+func TestCellInspectorScrollAndClose(t *testing.T) {
+	m := New()
+	m.SetSize(40, 10)
+	m.SetScreenSize(80, 24)
+	m.Focus()
+
+	longVal := strings.Repeat("payload-token ", 300) // wraps to many lines
+	m.SetResult(&db.QueryResult{
+		Columns: []string{"Data"},
+		Rows:    [][]string{{longVal}},
+	})
+
+	// Open the inspector on the selected cell.
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	if !m.InspectorOpen {
+		t.Fatalf("expected inspector to open")
+	}
+	if view := m.InspectorView(); !strings.Contains(view, "CELL VALUE INSPECTOR") {
+		t.Errorf("inspector view missing title")
+	}
+
+	// Scroll down: the viewport offset must advance (content is scrollable).
+	before := m.Inspector.YOffset
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	if m.Inspector.YOffset <= before {
+		t.Errorf("expected viewport to scroll, YOffset before=%d after=%d", before, m.Inspector.YOffset)
+	}
+
+	// Esc closes the inspector.
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.InspectorOpen {
+		t.Errorf("expected inspector to close on Esc")
+	}
+}
 
 func TestResultsGridAndExport(t *testing.T) {
 	resView := New()

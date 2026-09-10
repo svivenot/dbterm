@@ -812,6 +812,7 @@ func (m *Model) updateLayout() {
 	m.Explorer.SetSize(sidebarInnerWidth, explorerInnerHeight)
 	m.Editor.SetSize(mainInnerWidth, editorInnerHeight)
 	m.Results.SetSize(mainInnerWidth, resultsInnerHeight)
+	m.Results.SetScreenSize(m.Width, m.Height)
 	m.ConnModal.SetSize(m.Width, m.Height)
 	m.HistoryModal.SetSize(m.Width, m.Height)
 	m.ExportModal.SetSize(m.Width, m.Height)
@@ -861,26 +862,27 @@ func (m Model) View() string {
 	screen := lipgloss.JoinVertical(lipgloss.Left, topBar, mainLayout, statusBar)
 
 	// Modal Overlays
-	if m.AIModal.Active {
-		return m.placeOverlay(screen, m.AIModal.View())
-	}
-	if m.ExportModal.Active {
-		return m.placeOverlay(screen, m.ExportModal.View())
-	}
-	if m.HelpModal.Active {
-		return m.placeOverlay(screen, m.HelpModal.View())
-	}
-	if m.ConnModal.Active {
-		return m.placeOverlay(screen, m.ConnModal.View())
-	}
-	if m.HistoryModal.Active {
-		return m.placeOverlay(screen, m.HistoryModal.View())
-	}
-	if m.SaveModal.Active {
-		return m.placeOverlay(screen, m.SaveModal.View())
+	switch {
+	case m.Results.InspectorOpen:
+		screen = m.placeOverlay(screen, m.Results.InspectorView())
+	case m.AIModal.Active:
+		screen = m.placeOverlay(screen, m.AIModal.View())
+	case m.ExportModal.Active:
+		screen = m.placeOverlay(screen, m.ExportModal.View())
+	case m.HelpModal.Active:
+		screen = m.placeOverlay(screen, m.HelpModal.View())
+	case m.ConnModal.Active:
+		screen = m.placeOverlay(screen, m.ConnModal.View())
+	case m.HistoryModal.Active:
+		screen = m.placeOverlay(screen, m.HistoryModal.View())
+	case m.SaveModal.Active:
+		screen = m.placeOverlay(screen, m.SaveModal.View())
 	}
 
-	return screen
+	// Global safety net: never emit a frame larger than the terminal, otherwise
+	// wrapped/overflowing lines desynchronize the renderer and rows appear to
+	// duplicate as the user navigates (notably under Windows Terminal / WSL).
+	return lipgloss.NewStyle().MaxWidth(m.Width).MaxHeight(m.Height).Render(screen)
 }
 
 func (m Model) renderTopBar() string {
